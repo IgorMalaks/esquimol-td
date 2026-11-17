@@ -1,22 +1,26 @@
 // Arena: HUD, barra de esquimós (toque ou arraste), painel de upgrades e fim de partida.
-import { el, toast, modal, confirmDialog } from '../core/utils.js';
+import { el, toast, modal, confirmDialog, uid } from '../core/utils.js';
 import { go } from '../core/router.js';
 import { currentAccount } from '../core/auth.js';
 import { getData, byId } from '../data/gameData.js';
 import { ensureProgress, equippedItems, applyMatchResult } from '../core/progression.js';
 import { Game, TARGET_LABEL } from '../game/game.js';
-import { UPGRADE_TRACKS, upgradeCost, effectText, STAT_LABELS } from '../game/stats.js';
+import { UPGRADE_TRACKS, upgradeCost, effectText, STAT_LABELS, computeStats } from '../game/stats.js';
 import { eskimoCanvas, itemCanvas } from '../render/faceRenderer.js';
 import { CLASSES } from '../data/defaults.js';
+import { roundsHaveAir } from '../game/enemies.js';
+import { economy } from '../game/economy.js';
 
 const DRAG_THRESHOLD = 10;
 
-export function gameScreen(root, { phaseId }) {
+export function gameScreen(root, { phaseId, endless = false }) {
   const acc = currentAccount();
   if (!acc) { go('login'); return; }
   ensureProgress(acc);
   const data = getData();
-  const phase = byId(data.phases, phaseId);
+  const phase = endless
+    ? { id: 'infinito', name: 'Modo Infinito', mapId: data.maps[0]?.id, startGold: 650, lives: 100, rounds: [], endless: uid('seed') }
+    : byId(data.phases, phaseId);
   const map = phase && byId(data.maps, phase.mapId);
   if (!phase || !map) { toast('Fase inválida.', 'error'); go('menu'); return; }
 
@@ -31,6 +35,9 @@ export function gameScreen(root, { phaseId }) {
     gold: el('span', { class: 'hud-val' }),
     round: el('span', { class: 'hud-val' }),
   };
+  const bossLife = el('progress', { 'aria-label': 'Vida do chefe' });
+  const bossName = el('span');
+  const bossStatus = el('div', { class: 'hud-boss', hidden: true }, bossName, bossLife);
   const startBtn = el('button', { class: 'btn btn-go', text: 'Iniciar rodada', onclick: () => game.startRound() });
   const speedBtn = el('button', { class: 'btn btn-small', text: '1x', onclick: () => { game.speed = game.speed === 1 ? 2 : 1; } });
   const autoBtn = el('button', { class: 'btn btn-small', text: 'Auto: não', onclick: () => {
@@ -41,7 +48,9 @@ export function gameScreen(root, { phaseId }) {
     class: 'btn btn-small btn-danger', text: 'Sair',
     onclick: async () => {
       if (game.over) { go('menu'); return; }
-      if (await confirmDialog('Abandonar a partida conta como derrota. Itens já coletados são mantidos.', { okLabel: 'Abandonar', danger: true })) game.end(false);
+      const message = endless ? 'Encerrar a partida e registrar as rodadas concluídas?' :
+        'Abandonar a partida conta como derrota. Itens já coletados são mantidos.';
+      if (await confirmDialog(message, { okLabel: 'Encerrar', danger: true })) game.end(false);
     },
   });
 
@@ -62,7 +71,7 @@ export function gameScreen(root, { phaseId }) {
         el('span', { class: 'hud-item lives', title: 'Vidas' }, el('i', { class: 'ico-heart' }), hud.lives),
         el('span', { class: 'hud-item gold', title: 'Ouro' }, el('i', { class: 'ico-coin' }), hud.gold),
         el('span', { class: 'hud-item', title: 'Rodada' }, 'Rodada ', hud.round)),
-      el('div', { class: 'hud-actions' }, autoBtn, speedBtn, startBtn, exitBtn)),
+      el('div', { class: 'hud-actions' }, autoBtn, speedBtn, startBtn, exitBtn), bossStatus),
     el('div', { class: 'game-body' }, el('div', { class: 'canvas-wrap' }, canvas, panel), bar)));
 
   const game = new Game(canvas, {
@@ -71,9 +80,17 @@ export function gameScreen(root, { phaseId }) {
       onHud: (s) => {
         hud.lives.textContent = s.lives;
         hud.gold.textContent = s.gold;
-        hud.round.textContent = `${Math.min(s.round + 1, s.totalRounds)}/${s.totalRounds}`;
+        hud.round.textContent = endless ? String(s.round + 1) : `${Math.min(s.round + 1, s.totalRounds)}/${s.totalRounds}`;
         startBtn.disabled = s.roundActive || s.over;
-        startBtn.textContent = s.roundActive ? 'Em andamento...' : 'Iniciar rodada';
+        const upcoming = !s.roundActive && game.nextRound();
+        const air = upcoming && roundsHaveAir([upcoming], data.enemies);
+        startBtn.textContent = s.roundActive ? 'Em andamento...' : air ? 'Iniciar rodada · Aéreos' : 'Iniciar rodada';
+        bossStatus.hidden = !s.boss;
+        if (s.boss) {
+          bossName.textContent = s.boss.name;
+          bossLife.max = s.boss.maxHp;
+          bossLife.value = s.boss.hp;
+        }
         speedBtn.textContent = `${s.speed}x`;
         autoBtn.textContent = `Auto: ${s.autoStart ? 'sim' : 'não'}`;
         cards.forEach((c) => c.classList.toggle('poor', s.gold < Number(byId(data.eskimos, c.dataset.id).cost)));
@@ -85,6 +102,10 @@ export function gameScreen(root, { phaseId }) {
       onEnd: (r) => showResult(r),
     },
   });
+  if (roundsHaveAir(phase.rounds, data.enemies) &&
+      !roster.some((entry) => computeStats(entry.def, entry).hitsAir)) {
+    toast('Esta fase tem inimigos voadores.', 'info');
+  }
 
   // Arraste de card -> mapa (Pointer Events: mouse e touch unificados).
   function attachDrag(card, id) {
@@ -175,12 +196,13 @@ export function gameScreen(root, { phaseId }) {
   function showResult(r) {
     renderPanel(null);
     const res = applyMatchResult(acc, r);
-    const itemDefs = r.items.map((id) => byId(data.items, id)).filter(Boolean);
+    const itemDefs = res.gained.map((instance) => byId(data.items, instance.itemId)).filter(Boolean);
     modal({
-      title: r.victory ? 'Vitória!' : 'Derrota',
+      title: endless ? 'Fim do Infinito' : r.victory ? 'Vitória!' : 'Derrota',
       dismissable: false,
       body: el('div', { class: 'result' },
-        el('p', { text: `Rodadas completadas: ${r.roundsCompleted}/${phase.rounds.length}` }),
+        el('p', { text: `Rodadas completadas: ${r.roundsCompleted}${endless ? '' : `/${phase.rounds.length}`}` }),
+        endless && el('p', { text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
         el('p', { text: `XP para cada esquimó usado: +${res.xp}` }),
         res.levelUps.length && el('p', { class: 'bonus', text: `Novo ponto de habilidade: ${res.levelUps.map((id) => byId(data.eskimos, id)?.name).join(', ')}` }),
         res.newUnlocks.length && el('div', { class: 'unlocks' }, el('p', { class: 'bonus', text: 'Novo esquimó desbloqueado!' }),
@@ -189,14 +211,16 @@ export function gameScreen(root, { phaseId }) {
         el('ul', { class: 'item-list' }, itemDefs.map((it) => el('li', { class: `rarity-${it.rarity}` }, itemCanvas(it, 28), el('strong', { text: it.name }))))),
       actions: [
         { label: 'Quartel', onClick: () => go('menu', { tab: 'quartel' }) },
-        { label: 'Jogar de novo', onClick: () => go('game', { phaseId }) },
+        { label: 'Jogar de novo', onClick: () => go('game', { phaseId, endless }) },
         { label: 'Menu', class: 'btn-primary', onClick: () => go('menu') },
       ],
     });
   }
 
   // Gancho de teste/QA: abrir com ?debug expõe a instância no console.
-  if (new URLSearchParams(location.search).has('debug')) window.__etdGame = game;
+  if (localStorage.getItem('etd.dev') === '1' && new URLSearchParams(location.search).has('debug')) {
+    window.__etdGame = game;
+  }
 
   return () => {
     if (window.__etdGame === game) delete window.__etdGame;

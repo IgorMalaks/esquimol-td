@@ -105,7 +105,7 @@ describe('rollItem', () => {
   it('é determinístico com rng fixo', () => {
     const d = data();
     assert.equal(rollItem(d, () => 0).id, d.items[0].id);
-    assert.equal(rollItem(d, () => 0.999999).id, d.items.at(-1).id);
+    assert.equal(rollItem(d, () => 0.999999).id, 'estrela_polar');
   });
   it('ignora itens com peso 0', () => {
     const d = data();

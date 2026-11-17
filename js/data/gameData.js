@@ -1,33 +1,48 @@
 // Repositório do conteúdo editável pelo admin (esquimós, inimigos, itens, fases, mapas).
 import { storage } from '../core/storage.js';
-import { createDefaultData, DATA_VERSION } from './defaults.js';
+import { createDefaultData } from './defaults.js';
+import { migrateData } from './migrations.js';
 
 let cache = null;
 
 export function getData() {
   if (!cache) {
     const saved = storage.get('gamedata');
-    if (saved?.version === DATA_VERSION) {
-      cache = saved;
-    } else {
-      // Sem migrações ainda (ver docs/MELHORIAS.md). Versão diferente => volta ao padrão.
-      if (saved) console.warn('gamedata com versão diferente; restaurando padrão.');
+    if (saved === null) {
       cache = createDefaultData();
-      storage.set('gamedata', cache);
+      return cache;
+    }
+    try {
+      const next = prepareData(saved);
+      if (next !== saved) storage.set('gamedata', next);
+      cache = next;
+    } catch (error) {
+      console.warn('Não foi possível carregar o conteúdo salvo. O original foi preservado.', error);
+      cache = createDefaultData();
     }
   }
   return cache;
 }
 
-export function saveData(data) {
+export function prepareData(data) {
   validateData(data);
-  cache = data;
-  storage.set('gamedata', data);
+  const next = migrateData(data);
+  for (const key of ['abilities', 'raids', 'biomes']) {
+    if (!Array.isArray(next[key])) throw new Error(`Dados inválidos: "${key}" ausente.`);
+  }
+  return next;
+}
+
+export function saveData(data, { replace = false } = {}) {
+  const saved = storage.get('gamedata');
+  if (!replace && saved !== null) prepareData(saved);
+  const next = prepareData(data);
+  storage.set('gamedata', next);
+  cache = next;
 }
 
 export function resetData() {
-  cache = createDefaultData();
-  storage.set('gamedata', cache);
+  saveData(createDefaultData(), { replace: true });
   return cache;
 }
 

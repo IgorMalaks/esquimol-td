@@ -18,13 +18,18 @@ Para testar no celular na mesma rede, sirva com `--bind 0.0.0.0` e acesse pelo I
 
 Primeiro acesso ao admin: link **Painel Admin** no rodapé do login → define a senha (mín. 8 caracteres).
 
-Modo QA: abra com `?debug` para expor a partida em `window.__etdGame` (ex.: `__etdGame.speed = 10`).
+Modo QA: execute `localStorage.setItem('etd.dev', '1')` no navegador de teste e abra com `?debug` para expor a partida em `window.__etdGame`. Remova a flag com `localStorage.removeItem('etd.dev')`.
 
 ## Testes
 
 ```bash
 npm test   # Node 22+, sem dependências
+node tools/sim-economia.mjs 1000 esquimo-td
 ```
+
+## Publicação
+
+Importe o repositório na Vercel. O `vercel.json` configura o jogo como site estático sem build. As contas, os dados do Painel Admin e o progresso nesta etapa ficam no armazenamento do navegador, por domínio. O formato está em [Modelo de dados](docs/DATA-MODEL.md).
 
 ## Estrutura
 

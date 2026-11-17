@@ -3,20 +3,43 @@ import { getData, byId } from '../data/gameData.js';
 import { saveAccount } from './auth.js';
 import { skillPoints, pointsSpent } from '../game/stats.js';
 import { uid } from './utils.js';
+import { economy, fusionPool, resolveBossLoot, weightedPick } from '../game/economy.js';
+export { rollItem } from '../game/economy.js';
 
 export const SLOTS = ['arma', 'armadura', 'amuleto'];
 export const newEskimoProgress = () => ({ xp: 0, skills: [], equip: { arma: null, armadura: null, amuleto: null } });
 
+export const PROGRESS_VERSION = 2;
+const migrations = {
+  1: (progress) => ({
+    fragments: {}, raidKeys: 0, legendaryPity: 0, ...progress,
+    version: 2,
+    inventory: (progress.inventory ?? []).map((item) => ({ origin: 'local', ...item })),
+  }),
+};
+
+export function migrateProgress(progress) {
+  const version = progress?.version === undefined ? 1 : progress.version;
+  if (!Number.isInteger(version) || version < 1 || version > PROGRESS_VERSION) {
+    throw new Error('Versão de progresso incompatível com este jogo.');
+  }
+  let next = progress ?? {};
+  for (let current = version; current < PROGRESS_VERSION; current++) {
+    next = migrations[current](next);
+  }
+  return next;
+}
+
 // Normaliza o progresso e remove referências a conteúdo apagado pelo admin.
 export function ensureProgress(acc) {
   const data = getData();
-  acc.progress ??= {};
+  acc.progress = migrateProgress(acc.progress);
   const p = acc.progress;
   p.unlocked ??= [];
   p.eskimos ??= {};
   p.inventory ??= [];
   p.phases ??= {};
-  p.stats ??= { wins: 0, losses: 0, roundsTotal: 0 };
+  p.stats = { wins: 0, losses: 0, roundsTotal: 0, ...p.stats };
 
   p.unlocked = p.unlocked.filter((id) => byId(data.eskimos, id));
   p.inventory = p.inventory.filter((inst) => byId(data.items, inst.itemId));
@@ -25,6 +48,7 @@ export function ensureProgress(acc) {
   for (const id of p.unlocked) {
     const def = byId(data.eskimos, id);
     const ep = (p.eskimos[id] ??= newEskimoProgress());
+    ep.xp ??= 0;
     ep.equip = { arma: null, armadura: null, amuleto: null, ...ep.equip };
     const nodeIds = new Set(def.tree.map((n) => n.id));
     ep.skills = (ep.skills || []).filter((s) => nodeIds.has(s));
@@ -113,17 +137,39 @@ export function unequip(acc, eskimoId, slot) {
   saveAccount(acc);
 }
 
-export function rollItem(data, rng = Math.random) {
-  const pool = data.items.filter((i) => Number(i.dropWeight) > 0);
-  const total = pool.reduce((a, i) => a + Number(i.dropWeight), 0);
-  if (!total) return null;
-  let r = rng() * total;
-  for (const i of pool) { r -= Number(i.dropWeight); if (r <= 0) return i; }
-  return pool.at(-1);
+export function fuseItems(acc, uids, rng = Math.random) {
+  const data = getData();
+  const progress = acc.progress;
+  const inventory = progress.inventory;
+  const selected = new Set(uids);
+  const ingredients = inventory.filter((item) => selected.has(item.uid));
+  if (uids.length !== 3 || selected.size !== 3 || ingredients.length !== 3 ||
+      ingredients.some((item) => item.itemId !== ingredients[0].itemId || whoEquips(acc, item.uid))) {
+    throw new Error('Escolha três cópias do mesmo item, todas desequipadas.');
+  }
+  const item = byId(data.items, ingredients[0].itemId);
+  const pool = item ? fusionPool(data, item) : [];
+  if (!pool.length) throw new Error('Este item não pode ser fundido.');
+  const result = rng() < economy(data).fusionChance ? weightedPick(pool, (entry) => entry.dropWeight, rng) : null;
+  if (!result) selected.delete(ingredients[0].uid);
+  const next = {
+    ...progress,
+    inventory: inventory.filter((entry) => !selected.has(entry.uid)),
+    fusionStats: {
+      attempts: (progress.fusionStats?.attempts ?? 0) + 1,
+      successes: (progress.fusionStats?.successes ?? 0) + Number(Boolean(result)),
+    },
+  };
+  if (result) {
+    next.inventory.push({ uid: uid('it'), itemId: result.id, foundAt: new Date().toISOString(), origin: 'local' });
+  }
+  saveAccount({ ...acc, progress: next });
+  acc.progress = next;
+  return result;
 }
 
 // RBE (Red Bloon Equivalent): quantas "vidas" um inimigo e todas as suas camadas valem.
-export function rbe(enemyId, data, memo = {}) {
+export function rbe(enemyId, data, memo = Object.create(null)) {
   if (memo[enemyId] != null) return memo[enemyId];
   const e = byId(data.enemies, enemyId);
   if (!e) return 0;
@@ -148,21 +194,41 @@ export function layerChain(enemyId, data) {
 // ---------- Fim de partida ----------
 export function applyMatchResult(acc, r) {
   const p = acc.progress;
+  const data = getData();
+  const items = [...r.items];
+  for (const drops of r.bossDrops ?? []) {
+    const bossLoot = resolveBossLoot(data, p.legendaryPity ?? 0, drops.map((id) => byId(data.items, id)).filter(Boolean));
+    p.legendaryPity = bossLoot.pity;
+    if (bossLoot.bonus) items.push(bossLoot.bonus.id);
+  }
   const now = new Date().toISOString();
-  const gained = r.items.map((itemId) => {
-    const inst = { uid: uid('it'), itemId, foundAt: now };
+  const gained = items.map((itemId) => {
+    const inst = { uid: uid('it'), itemId, foundAt: now, origin: 'local' };
     p.inventory.push(inst);
     return inst;
   });
   p.stats.roundsTotal += r.roundsCompleted;
-  if (r.victory) p.stats.wins++; else p.stats.losses++;
-  const ph = (p.phases[r.phaseId] ??= { completed: false, bestRound: 0 });
-  ph.bestRound = Math.max(ph.bestRound, r.roundsCompleted);
-  if (r.victory) ph.completed = true;
+  if (r.endless) {
+    p.raidKeys = Math.min(5, (p.raidKeys ?? 0) + Math.floor(r.roundsCompleted / 15));
+    if (r.roundsCompleted > (p.endlessBest?.melhorWave ?? 0)) {
+      p.endlessBest = { melhorWave: r.roundsCompleted, data: now, duracaoSeg: r.duration,
+        esquadrao: [...r.usedEskimos], seed: r.endless, modo: 'solo' };
+    }
+  } else {
+    if (r.victory) p.stats.wins++; else p.stats.losses++;
+    const ph = (p.phases[r.phaseId] ??= { completed: false, bestRound: 0 });
+    ph.bestRound = Math.max(ph.bestRound, r.roundsCompleted);
+    if (r.victory) ph.completed = true;
+  }
+  p.lastMatchDrops = {};
+  for (const itemId of items) {
+    const rarity = byId(data.items, itemId)?.rarity;
+    if (rarity) p.lastMatchDrops[rarity] = (p.lastMatchDrops[rarity] ?? 0) + 1;
+  }
 
   const xp = r.roundsCompleted * 10 + (r.victory ? 50 : 0);
   const levelUps = [];
-  for (const id of r.usedEskimos) {
+  for (const id of new Set(r.usedEskimos)) {
     const ep = p.eskimos[id];
     if (!ep) continue;
     const before = skillPoints(ep);

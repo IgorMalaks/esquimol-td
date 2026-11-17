@@ -15,6 +15,8 @@ Para pedir execução, basta citar o ID: **"executa T1.3"** ou **"executa a fase
 
 ## F0 — Base (pré-requisito de tudo)
 
+O commit de importação preserva a licença e o histórico do repositório. O esquema 2 e o simulador de economia estão descritos em [Modelo de dados](DATA-MODEL.md) e no README.
+
 | ID | Tarefa | Spec / ADR | Depende de |
 |---|---|---|---|
 | [ ] T0.0 | **Base do projeto:** (a) `git init` + primeiro commit; (b) `docs/DATA-MODEL.md` com o formato completo e versionado de esquimó, inimigo, item, habilidade, fase, raide, bioma e conta (inclui `traits`, `powerTier`, `origin`, `damageType`, `element`, `fragments`, `raidKeys`, `legendaryPity`); (c) `tools/sim-economia.mjs`: simula N partidas e mostra curvas (partidas até o 1º Lendário, fragmentos por bioma, RBE × dano das waves do Infinito). | — | — |

@@ -7,6 +7,7 @@ export const EFFECT_KEYS = {
   splash: { label: 'Área (px)', fmt: (v) => `+${v} área` },
   slowPct: { label: 'Lentidão %', fmt: (v) => `+${v}% lentidão` },
   multishot: { label: 'Projéteis extras', fmt: (v) => `+${v} projétil(eis)` },
+  hitsAir: { label: 'Antiaéreo', fmt: () => 'Atinge aéreos' },
 };
 
 export const BASE_STATS = {
@@ -54,7 +55,9 @@ export function itemStatsText(item) {
 }
 
 export function computeStats(def, { items = [], nodes = [], upgrades = null } = {}) {
-  const s = { ...BASE_STATS, ...def.stats };
+  const s = { ...BASE_STATS, ...def.stats, hitsAir: Number(Boolean(
+    def.hitsAir || def.classId === 'arpoador' || def.classId === 'mago'
+  )) };
   for (const it of items) for (const [k, v] of Object.entries(it.stats || {})) applyEffect(s, k, v);
   for (const n of nodes) applyEffect(s, n.effect?.key, n.effect?.value);
   if (upgrades) for (const [k, lvl] of Object.entries(upgrades)) UPGRADE_TRACKS[k]?.apply(s, lvl);

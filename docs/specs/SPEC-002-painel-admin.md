@@ -1,5 +1,7 @@
 # SPEC-002 — Painel Admin
 
+Backups antigos passam pelas migrações do conteúdo. O painel também edita traços de inimigos e força dos itens dentro da raridade.
+
 **Status:** implementado · **Código:** `js/screens/adminScreen.js`, `js/data/gameData.js` · **ADRs:** 004, 007
 
 ## Abas

@@ -1,0 +1,8 @@
+/docs/
+/tests/
+/tools/
+/README.md
+/LICENSE
+/.env
+/.env.*
+/.vercel/

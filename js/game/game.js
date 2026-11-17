@@ -5,16 +5,22 @@ import { computeStats, UPGRADE_TRACKS, upgradeCost } from './stats.js';
 import { drawFaceCached, drawEskimo, drawItemIcon, drawChest } from '../render/faceRenderer.js';
 import { CLASSES, RARITIES } from '../data/defaults.js';
 import { rollItem, rbe } from '../core/progression.js';
+import { economy } from './economy.js';
+import { canHitEnemy, hasTrait } from './enemies.js';
+import { endlessEnemies, endlessGold, endlessRound } from './endless.js';
 import { seededRandom } from '../core/utils.js';
 
 export const WORLD = { W: 1000, H: 600 };
+export const GROUND_TILT = 0.95;
+const GROUND_TOP = WORLD.H * (1 - GROUND_TILT) / 2;
+export const projectY = (y, height = 0) => GROUND_TOP + y * GROUND_TILT - height;
+export const groundY = (y) => (y - GROUND_TOP) / GROUND_TILT;
 const STEP = 1 / 60;
 const MAX_STEPS_PER_FRAME = 12;
 export const TOWER_R = 20;
 const PATH_W = 46;
 const ITEM_LIFETIME = 8;
 const DROP_HIT_R = 30;
-const CHEST_CHANCE = 0.25;
 const SELL_RATIO = 0.7;
 
 export const TARGET_MODES = ['primeiro', 'ultimo', 'forte', 'perto'];
@@ -37,8 +43,14 @@ export class Game {
     this.roster = roster;
     this.cb = callbacks;
     this.path = new Path(map.points.map(([x, y]) => ({ x: x * WORLD.W, y: y * WORLD.H })));
+    this.flightPath = map.flightPath?.length > 1
+      ? new Path(map.flightPath.map(([x, y]) => ({ x: x * WORLD.W, y: y * WORLD.H })))
+      : this.path;
     this.enemyDefs = new Map(data.enemies.map((e) => [e.id, e]));
-    this.rbeMemo = {};
+    this.roundData = data;
+    this.rbeMemo = Object.create(null);
+    this.canHitAir = roster.some((entry) => computeStats(entry.def, entry).hitsAir);
+    this.bossDrops = [];
 
     this.gold = Number(phase.startGold);
     this.lives = Number(phase.lives);
@@ -128,8 +140,14 @@ export class Game {
   // ---------- Rodadas ----------
   startRound() {
     if (this.roundActive || this.over) return;
-    const r = this.phase.rounds[this.round];
-    if (!r) return;
+    const r = this.nextRound();
+    if (!r?.groups.length) return;
+    if (this.phase.endless) {
+      const enemies = endlessEnemies(this.data, this.round + 1);
+      this.roundData = { ...this.data, enemies };
+      this.enemyDefs = new Map(enemies.map((enemy) => [enemy.id, enemy]));
+      this.rbeMemo = Object.create(null);
+    }
     const queue = [];
     for (const grp of r.groups) {
       const def = this.enemyDefs.get(grp.enemyId);
@@ -143,12 +161,18 @@ export class Game {
     this.roundActive = true;
   }
 
+  nextRound() {
+    return this.phase.endless
+      ? endlessRound(this.data, this.round + 1, this.phase.endless, this.canHitAir)
+      : this.phase.rounds[this.round];
+  }
+
   _endRound() {
     this.roundActive = false;
     this.round++;
-    const bonus = 100 + this.round;
+    const bonus = this.phase.endless ? endlessGold(this.round) : 100 + this.round;
     this.gold += bonus;
-    if (this.round >= this.phase.rounds.length) { this.end(true); return; }
+    if (!this.phase.endless && this.round >= this.phase.rounds.length) { this.end(true); return; }
     this.cb.onToast?.(`Rodada ${this.round} concluída! +${bonus} ouro`, 'success');
     if (this.autoStart) this.startRound();
   }
@@ -164,14 +188,16 @@ export class Game {
     this.cb.onEnd?.({
       victory, phaseId: this.phase.id, roundsCompleted: this.round,
       items: [...this.loot], usedEskimos: [...this.used],
+      endless: this.phase.endless, duration: Math.floor(this.time), bossDrops: this.bossDrops,
     });
   }
 
   // ---------- Inimigos ----------
   spawnEnemy(def, dist) {
-    const p = this.path.pointAt(dist);
+    const path = hasTrait(def, 'aereo') ? this.flightPath : this.path;
+    const p = path.pointAt(dist);
     const e = {
-      id: ++this.seq, def, dist, x: p.x, y: p.y, r: Number(def.size) || 15,
+      id: ++this.seq, def, path, dist, x: p.x, y: p.y, r: Number(def.size) || 15,
       hp: Math.max(1, Number(def.hp) || 1), alive: true, slowPct: 0, slowTimer: 0, phase: Math.random() * 6,
     };
     this.enemies.push(e);
@@ -182,20 +208,21 @@ export class Game {
     if (!e.alive) return;
     if (e.slowTimer > 0) { e.slowTimer -= dt; if (e.slowTimer <= 0) e.slowPct = 0; }
     e.dist += Number(e.def.speed) * (1 - e.slowPct) * dt;
-    if (e.dist >= this.path.length) {
+    if (e.dist >= e.path.length) {
       e.alive = false;
-      this.lives -= rbe(e.def.id, this.data, this.rbeMemo);
+      this.lives -= rbe(e.def.id, this.roundData, this.rbeMemo);
       if (this.lives <= 0) { this.lives = 0; this.end(false); }
       return;
     }
-    const p = this.path.pointAt(e.dist);
+    const p = e.path.pointAt(e.dist);
     e.x = p.x; e.y = p.y;
   }
 
   hitEnemy(e, dmg, p) {
-    if (!e.alive) return;
+    if (!e.alive || (p && !canHitEnemy(e.def, p.hitsAir))) return;
     if (p?.slowPct > 0) {
-      e.slowPct = Math.max(e.slowPct, Math.min(0.8, p.slowPct / 100));
+      const factor = hasTrait(e.def, 'chefe') ? 0.5 : 1;
+      e.slowPct = Math.max(e.slowPct, Math.min(0.8, p.slowPct / 100) * factor);
       e.slowTimer = Math.max(e.slowTimer, p.slowDur);
     }
     e.hp -= dmg;
@@ -208,26 +235,36 @@ export class Game {
     this.gold += Number(e.def.reward) || 0;
     if (p?.tower) p.tower.pops++;
     this.effects.push({ type: 'pop', x: e.x, y: e.y, r: e.r, color: e.def.face.skin, t: 0, dur: 0.3 });
-    this._maybeDrop(e);
+    if (this.phase.endless && hasTrait(e.def, 'chefe')) {
+      const reward = rollItem(this.data);
+      const drops = reward ? [reward.id] : [];
+      this.loot.push(...drops);
+      this.bossDrops.push(drops);
+    } else {
+      this._maybeDrop(e);
+    }
     const child = e.def.childId && this.enemyDefs.get(e.def.childId);
     if (!child) return;
     const children = [];
     const n = Math.max(1, Number(e.def.childCount) || 1);
     for (let i = 0; i < n; i++) {
-      const c = this.spawnEnemy(child, Math.max(0, e.dist - i * 12));
+      const childPath = hasTrait(child, 'aereo') ? this.flightPath : this.path;
+      const distance = childPath === e.path ? e.dist : e.dist * childPath.length / e.path.length;
+      const c = this.spawnEnemy(child, Math.max(0, distance - i * 12));
       c.slowPct = e.slowPct; c.slowTimer = e.slowTimer;
       p?.hit.add(c.id);
       children.push(c);
     }
-    if (overflow > 0) this.hitEnemy(children[0], overflow, null);
+    if (overflow > 0 && canHitEnemy(child, p?.hitsAir)) this.hitEnemy(children[0], overflow, p && { hitsAir: p.hitsAir });
   }
 
   // ---------- Drops ----------
   _maybeDrop(e) {
-    if (Math.random() >= (Number(e.def.dropChance) || 0)) return;
+    const settings = economy(this.data);
+    if (Math.random() >= (Number(e.def.dropChance) || 0) * settings.dropRateMultiplier) return;
     const item = rollItem(this.data);
     if (!item) return;
-    const chest = Math.random() < CHEST_CHANCE;
+    const chest = Math.random() < settings.chestChance;
     const ang = Math.random() * Math.PI * 2;
     const off = PATH_W * 0.7;
     this.drops.push({
@@ -334,13 +371,14 @@ export class Game {
     let best = null;
     let bestScore = -Infinity;
     for (const e of this.enemies) {
-      if (!e.alive || dist2(t.x, t.y, e.x, e.y) > (r + e.r) ** 2) continue;
+      if (!e.alive || !canHitEnemy(e.def, t.stats.hitsAir) || dist2(t.x, t.y, e.x, e.y) > (r + e.r) ** 2) continue;
+      const progress = e.dist / e.path.length;
       let score;
       switch (t.targetMode) {
-        case 'ultimo': score = -e.dist; break;
-        case 'forte': score = rbe(e.def.id, this.data, this.rbeMemo) * 1e5 + e.dist; break;
+        case 'ultimo': score = -progress; break;
+        case 'forte': score = rbe(e.def.id, this.roundData, this.rbeMemo) * 2 + progress; break;
         case 'perto': score = -dist2(t.x, t.y, e.x, e.y); break;
-        default: score = e.dist;
+        default: score = progress;
       }
       if (score > bestScore) { bestScore = score; best = e; }
     }
@@ -359,13 +397,14 @@ export class Game {
     const kind = CLASSES[t.def.classId]?.projectile || 'flecha';
     const n = 1 + s.multishot;
     const spread = 0.16;
+    const flightTime = (s.range * 1.4) / s.projectileSpeed + 0.1;
     for (let i = 0; i < n; i++) {
       const a = base + (i - (n - 1) / 2) * spread;
       this.projectiles.push({
         id: ++this.seq, kind, tower: t,
         x: t.x + Math.cos(a) * TOWER_R, y: t.y + Math.sin(a) * TOWER_R,
         vx: Math.cos(a) * s.projectileSpeed, vy: Math.sin(a) * s.projectileSpeed, angle: a,
-        life: (s.range * 1.4) / s.projectileSpeed + 0.1,
+        life: flightTime, flightTime, hitsAir: s.hitsAir,
         damage: s.damage, pierce: s.pierce, splash: s.splash, slowPct: s.slowPct, slowDur: s.slowDuration,
         hit: new Set(), r: kind === 'bola' ? 8 : 6,
       });
@@ -377,7 +416,7 @@ export class Game {
     p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
     if (p.life <= 0 || p.x < -30 || p.y < -30 || p.x > WORLD.W + 30 || p.y > WORLD.H + 30) { p.dead = true; return; }
     for (const e of this.enemies) {
-      if (!e.alive || p.hit.has(e.id)) continue;
+      if (!e.alive || p.hit.has(e.id) || !canHitEnemy(e.def, p.hitsAir)) continue;
       if (dist2(p.x, p.y, e.x, e.y) > (e.r + p.r) ** 2) continue;
       if (p.splash > 0) { this._explode(p, e.x, e.y); p.dead = true; return; }
       p.hit.add(e.id);
@@ -412,8 +451,9 @@ export class Game {
 
   clientToWorld(cx, cy) {
     const rect = this.canvas.getBoundingClientRect();
-    const inside = cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom;
-    return { x: ((cx - rect.left) / rect.width) * WORLD.W, y: ((cy - rect.top) / rect.height) * WORLD.H, inside };
+    const x = ((cx - rect.left) / rect.width) * WORLD.W;
+    const y = groundY(((cy - rect.top) / rect.height) * WORLD.H);
+    return { x, y, inside: x >= 0 && x <= WORLD.W && y >= 0 && y <= WORLD.H };
   }
 
   updateGhost(cx, cy) {
@@ -436,13 +476,15 @@ export class Game {
   }
 
   handleTap(x, y) {
-    const drop = this.drops.find((d) => dist2(d.x, d.y, x, y) <= DROP_HIT_R ** 2);
+    const drop = this.drops.find((d) => dist2(d.x, d.y - 10 / GROUND_TILT, x, y) <= DROP_HIT_R ** 2);
     if (drop) { this._collectDrop(drop); return; }
     if (this.placing) {
       if (this.placeTower(this.placing, x, y)) this.cancelPlacing();
       return;
     }
-    const t = this.towers.find((tw) => dist2(tw.x, tw.y, x, y) <= (TOWER_R + 6) ** 2);
+    const t = this.towers.filter((tw) =>
+      dist2(tw.x, tw.y - TOWER_R * 0.75 / GROUND_TILT, x, y) <= (TOWER_R + 6) ** 2
+    ).sort((a, b) => b.y - a.y)[0];
     this.select(t || null);
   }
 
@@ -475,9 +517,11 @@ export class Game {
   }
 
   _emitHud() {
+    const boss = this.enemies.find((enemy) => enemy.alive && hasTrait(enemy.def, 'chefe'));
     const s = {
       gold: Math.floor(this.gold), lives: this.lives, round: this.round, totalRounds: this.phase.rounds.length,
       roundActive: this.roundActive, speed: this.speed, autoStart: this.autoStart, over: this.over,
+      boss: boss ? { name: boss.def.name, hp: Math.ceil(boss.hp), maxHp: boss.def.hp } : null,
     };
     const key = JSON.stringify(s);
     if (key !== this._hudKey) { this._hudKey = key; this.cb.onHud?.(s); }
@@ -511,6 +555,8 @@ export class Game {
     grad.addColorStop(1, '#d9eefc');
     g.fillStyle = grad;
     g.fillRect(0, 0, WORLD.W, WORLD.H);
+    g.translate(0, GROUND_TOP);
+    g.scale(1, GROUND_TILT);
 
     const rnd = seededRandom(this.map.id);
     g.fillStyle = 'rgba(160,210,240,0.35)';
@@ -559,48 +605,27 @@ export class Game {
 
     for (const d of this.drops) this._drawDrop(ctx, d);
 
-    const sorted = [...this.enemies].sort((a, b) => a.dist - b.dist);
-    for (const e of sorted) {
-      const bob = Math.sin(this.time * 8 + e.phase) * 1.5;
-      ctx.fillStyle = 'rgba(0,40,80,0.18)';
-      ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.9, e.r * 0.8, e.r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
-      drawFaceCached(ctx, e.def.face, e.x, e.y + bob, e.r, this.px);
-      if (e.slowPct > 0) {
-        ctx.strokeStyle = 'rgba(126,252,255,0.9)'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(e.x, e.y + bob, e.r + 3, 0, Math.PI * 2); ctx.stroke();
-      }
-      if (e.def.hp > 1) {
-        const w = e.r * 2;
-        ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w, 4);
-        ctx.fillStyle = '#2ed573'; ctx.fillRect(e.x - w / 2, e.y - e.r - 10, w * (e.hp / e.def.hp), 4);
-      }
-    }
-
     if (this.selected) this._drawRange(ctx, this.selected.x, this.selected.y, this.selected.stats.range, true);
-    for (const t of this.towers) {
-      drawEskimo(ctx, t.def, t.x, t.y, TOWER_R, t.angle, this.px);
-      const lv = t.upgrades.dmg + t.upgrades.spd + t.upgrades.rng + t.active.size;
-      if (lv) {
-        ctx.fillStyle = '#ffd32a'; ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(t.x + TOWER_R * 0.8, t.y + TOWER_R * 0.8, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#1b1b1b'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(String(lv), t.x + TOWER_R * 0.8, t.y + TOWER_R * 0.8 + 0.5);
-      }
+    const actors = [...this.enemies, ...this.towers].sort((a, b) => a.y - b.y);
+    for (const actor of actors) {
+      if (actor.upgrades) this._drawTower(ctx, actor);
+      else this._drawEnemy(ctx, actor);
     }
 
     for (const p of this.projectiles) this._drawProjectile(ctx, p);
 
     for (const fx of this.effects) {
       const k = fx.t / fx.dur;
+      const y = projectY(fx.y, fx.type === 'pop' ? fx.r * 0.45 : 0);
       ctx.globalAlpha = 1 - k;
       ctx.strokeStyle = fx.color;
       ctx.lineWidth = fx.type === 'pop' ? 4 : 3;
-      ctx.beginPath(); ctx.arc(fx.x, fx.y, fx.r * (fx.type === 'pop' ? 0.6 + k : 0.4 + 0.6 * k), 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(fx.x, y, fx.r * (fx.type === 'pop' ? 0.6 + k : 0.4 + 0.6 * k), 0, Math.PI * 2); ctx.stroke();
       if (fx.type === 'pop') {
         ctx.fillStyle = fx.color;
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * Math.PI * 2;
-          ctx.beginPath(); ctx.arc(fx.x + Math.cos(a) * fx.r * (0.5 + 1.5 * k), fx.y + Math.sin(a) * fx.r * (0.5 + 1.5 * k), 3, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(fx.x + Math.cos(a) * fx.r * (0.5 + 1.5 * k), y + Math.sin(a) * fx.r * (0.5 + 1.5 * k), 3, 0, Math.PI * 2); ctx.fill();
         }
       }
       ctx.globalAlpha = 1;
@@ -612,7 +637,7 @@ export class Game {
         const st = computeStats(entry.def, { items: entry.items });
         this._drawRange(ctx, this.ghost.x, this.ghost.y, st.range, this.ghost.valid);
         ctx.globalAlpha = 0.7;
-        drawEskimo(ctx, entry.def, this.ghost.x, this.ghost.y, TOWER_R, -Math.PI / 2, this.px);
+        drawEskimo(ctx, entry.def, this.ghost.x, projectY(this.ghost.y), TOWER_R, -Math.PI / 2, this.px);
         ctx.globalAlpha = 1;
       }
     }
@@ -621,11 +646,42 @@ export class Game {
     for (const f of this.snow) { ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI * 2); ctx.fill(); }
   }
 
+  _drawEnemy(ctx, e) {
+      const ground = projectY(e.y);
+      const altitude = hasTrait(e.def, 'aereo') ? 60 : 0;
+      const x = e.x + (altitude ? Math.sin(this.time * 3 + e.phase) * 4 : 0);
+      const y = ground - altitude - e.r * 0.55 + Math.sin(this.time * 8 + e.phase) * 1.5;
+      ctx.fillStyle = 'rgba(0,40,80,0.18)';
+      ctx.beginPath(); ctx.ellipse(e.x, ground, e.r * 0.8, e.r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+      drawFaceCached(ctx, e.def.face, x, y, e.r, this.px);
+      if (e.slowPct > 0) {
+        ctx.strokeStyle = 'rgba(126,252,255,0.9)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(e.x, y, e.r + 3, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (e.def.hp > 1) {
+        const w = e.r * 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(e.x - w / 2, y - e.r - 10, w, 4);
+        ctx.fillStyle = '#2ed573'; ctx.fillRect(e.x - w / 2, y - e.r - 10, w * (e.hp / e.def.hp), 4);
+      }
+  }
+
+  _drawTower(ctx, t) {
+      const y = projectY(t.y);
+      drawEskimo(ctx, t.def, t.x, y, TOWER_R, t.angle, this.px);
+      const lv = t.upgrades.dmg + t.upgrades.spd + t.upgrades.rng + t.active.size;
+      if (lv) {
+        ctx.fillStyle = '#ffd32a'; ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(t.x + TOWER_R * 0.8, y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#1b1b1b'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(lv), t.x + TOWER_R * 0.8, y + 0.5);
+      }
+  }
+
   _drawRange(ctx, x, y, r, ok) {
     ctx.fillStyle = ok ? 'rgba(255,255,255,0.25)' : 'rgba(255,71,87,0.25)';
     ctx.strokeStyle = ok ? 'rgba(30,60,90,0.5)' : 'rgba(255,71,87,0.8)';
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, projectY(y), r, r * GROUND_TILT, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 
   _drawDrop(ctx, d) {
@@ -636,14 +692,17 @@ export class Game {
     const glow = d.type === 'chest' ? '#ffd32a' : RARITIES[item?.rarity]?.color || '#ffffff';
     ctx.save();
     ctx.shadowColor = glow; ctx.shadowBlur = 16;
-    if (d.type === 'chest') drawChest(ctx, d.x, d.y + bob, 13);
-    else if (item) drawItemIcon(ctx, item, d.x, d.y + bob, 12);
+    const y = projectY(d.y, 10) + bob;
+    if (d.type === 'chest') drawChest(ctx, d.x, y, 13);
+    else if (item) drawItemIcon(ctx, item, d.x, y, 12);
     ctx.restore();
   }
 
   _drawProjectile(ctx, p) {
     ctx.save();
-    ctx.translate(p.x, p.y);
+    const progress = 1 - p.life / p.flightTime;
+    const height = p.kind === 'bola' ? 16 + Math.sin(progress * Math.PI) * 32 : 16;
+    ctx.translate(p.x, projectY(p.y, height));
     ctx.rotate(p.angle);
     ctx.lineCap = 'round';
     switch (p.kind) {

@@ -158,9 +158,11 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
 .item-list li > div { flex: 1; }
 .item-list small { display: block; }
 .rarity-comum { border-left-color: #9aa5ab !important; }
+.rarity-incomum { border-left-color: #187542 !important; }
 .rarity-raro { border-left-color: #0984e3 !important; }
 .rarity-epico { border-left-color: #a55eea !important; }
 .rarity-lendario { border-left-color: #f39c12 !important; }
+.rarity-mitico { border-left-color: #c32351 !important; }
 
 /* ====== Arena ====== */
 .screen-game { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
@@ -171,6 +173,9 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
 .hud-stats, .hud-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .hud-item { display: inline-flex; align-items: center; gap: .3rem; font-weight: bold; background: #eef8ff; border: 2px solid var(--ink); border-radius: 999px; padding: .2rem .6rem; }
 .hud-val { min-width: 2ch; }
+.hud-boss { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: .5rem; }
+.hud-boss[hidden] { display: none; }
+.hud-boss progress { width: min(42vw, 18rem); accent-color: #bb3553; }
 .ico-heart, .ico-coin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--ink); border-radius: 50%; }
 .ico-heart { background: var(--danger); border-radius: 50% 50% 50% 0; transform: rotate(-45deg) scale(.85); }
 .ico-coin { background: var(--gold); }

@@ -1,6 +1,7 @@
 // Conteúdo padrão do jogo. Tudo aqui é editável pelo Painel Admin;
 // este arquivo só é usado na primeira execução ou em "Restaurar padrões".
-export const DATA_VERSION = 1;
+import { migrateData } from './migrations.js';
+export { DATA_VERSION } from './migrations.js';
 
 // Classes = comportamento (código). Esquimós = instâncias (dados) — ver ADR-007.
 export const CLASSES = {
@@ -26,9 +27,11 @@ export const DEFAULT_FACE = {
 export const ITEM_TYPES = { arma: 'Arma', armadura: 'Armadura', amuleto: 'Amuleto' };
 export const RARITIES = {
   comum: { name: 'Comum', color: '#9aa5ab', weight: 60 },
+  incomum: { name: 'Incomum', color: '#187542', weight: 25 },
   raro: { name: 'Raro', color: '#0984e3', weight: 25 },
   epico: { name: 'Épico', color: '#a55eea', weight: 12 },
   lendario: { name: 'Lendário', color: '#f39c12', weight: 3 },
+  mitico: { name: 'Mítico', color: '#c32351', weight: 1 },
 };
 
 const face = (o) => ({ ...DEFAULT_FACE, ...o });
@@ -106,7 +109,9 @@ function enemies() {
     { id: 'amarelo', name: 'Carinha Amarela', hp: 1, speed: 170, size: 16, reward: 1, dropChance: 0.03, childId: 'verde', childCount: 1, face: enemyFace('#ffd32a', { mouth: 'aberta', shape: 'oval' }) },
     { id: 'rosa', name: 'Carinha Rosa', hp: 1, speed: 200, size: 16, reward: 1, dropChance: 0.04, childId: 'amarelo', childCount: 1, face: enemyFace('#ff6b9d', { mouth: 'lingua', accessory: 'bochechas', accessoryColor: '#c44569' }) },
     { id: 'pedra', name: 'Cara de Pedra', hp: 6, speed: 55, size: 22, reward: 5, dropChance: 0.1, childId: 'rosa', childCount: 2, face: enemyFace('#95a5a6', { shape: 'quadrado', mouth: 'dentes', accessory: 'cicatriz', accessoryColor: '#2d3436' }) },
-    { id: 'chefe', name: 'Chefão Glacial', hp: 60, speed: 35, size: 40, reward: 50, dropChance: 0.8, childId: 'pedra', childCount: 4, face: enemyFace('#74b9ff', { shape: 'gota', eyes: 'ciclope', eyeColor: '#c0392b', mouth: 'dentes', headwear: 'coroa', headwearColor: '#f1c40f' }) },
+    { id: 'chefe', name: 'Chefão Glacial', hp: 60, speed: 35, size: 40, reward: 50, dropChance: 0.8, childId: 'pedra', childCount: 4, traits: ['chefe'], face: enemyFace('#74b9ff', { shape: 'gota', eyes: 'ciclope', eyeColor: '#c0392b', mouth: 'dentes', headwear: 'coroa', headwearColor: '#f1c40f' }) },
+    { id: 'corvo_gelo', name: 'Corvo de Gelo', hp: 1, speed: 145, size: 13, reward: 2, dropChance: 0.03, childId: '', childCount: 0, traits: ['aereo'], face: enemyFace('#b1dcf1', { shape: 'gota', headwear: 'orelhas' }) },
+    { id: 'dirigivel_glacial', name: 'Dirigível Glacial', hp: 20, speed: 58, size: 25, reward: 15, dropChance: 0.18, childId: 'pedra', childCount: 3, traits: ['aereo'], face: enemyFace('#daf2ff', { shape: 'oval', headwear: 'gorro' }) },
   ];
 }
 
@@ -116,11 +121,15 @@ function items() {
   return [
     it('luva_gelo', 'Luvas de Pele de Foca', 'armadura', 'comum', { speedPct: 10 }),
     it('bola_compacta', 'Neve Compactada', 'arma', 'comum', { splash: 15 }, 'bolanev'),
+    it('luvas_costuradas', 'Luvas Costuradas', 'armadura', 'incomum', { speedPct: 15 }),
+    it('pingente_cristal', 'Pingente de Cristal', 'amuleto', 'incomum', { rangePct: 8 }),
     it('dente_morsa', 'Dente de Morsa', 'amuleto', 'raro', { damage: 1 }),
     it('arco_runico', 'Arco Rúnico', 'arma', 'raro', { damage: 1, rangePct: 10 }, 'arqueiro'),
     it('amuleto_aurora', 'Amuleto da Aurora', 'amuleto', 'epico', { rangePct: 15, speedPct: 10 }),
     it('arpao_narval', 'Arpão de Narval', 'arma', 'epico', { pierce: 3 }, 'arpoador'),
     it('cajado_boreal', 'Cajado Boreal', 'arma', 'lendario', { slowPct: 15, damage: 1 }, 'mago'),
+    { ...it('estrela_polar', 'Estrela Polar', 'amuleto', 'lendario', { damage: 1, rangePct: 12 }), powerTier: 2 },
+    { ...it('coroa_glacial', 'Coroa Glacial', 'armadura', 'mitico', { speedPct: 25, rangePct: 20 }), powerTier: 3 },
   ];
 }
 
@@ -160,12 +169,12 @@ function phases() {
         [g('pedra', 5, 2), g('rosa', 10, 0.6)],
         [g('amarelo', 30, 0.3)],
         [g('pedra', 8, 1.5), g('rosa', 20, 0.4)],
-        [g('chefe', 1, 1), g('pedra', 4, 2, 6)],
+        [g('chefe', 1, 1), g('pedra', 4, 2, 6), g('dirigivel_glacial', 1, 1, 10)],
       ].map((groups) => ({ groups })),
     },
   ];
 }
 
 export function createDefaultData() {
-  return { version: DATA_VERSION, eskimos: eskimos(), enemies: enemies(), items: items(), maps: maps(), phases: phases() };
+  return migrateData({ version: 1, eskimos: eskimos(), enemies: enemies(), items: items(), maps: maps(), phases: phases() });
 }

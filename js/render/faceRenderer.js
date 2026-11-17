@@ -302,17 +302,33 @@ function weapon(ctx, classId, r) {
 export function drawEskimo(ctx, def, x, y, r, angle = -Math.PI / 2, pxScale = 1) {
   ctx.save();
   ctx.fillStyle = 'rgba(0,40,80,0.18)';
-  ctx.beginPath(); ctx.ellipse(x, y + r * 0.85, r * 0.95, r * 0.35, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x, y, r * 0.95, r * 0.35, 0, 0, TAU); ctx.fill();
   ctx.translate(x, y);
-  ctx.save(); ctx.rotate(angle); weapon(ctx, def.classId, r); ctx.restore();
-  ctx.lineWidth = Math.max(1.5, r * 0.1); ctx.strokeStyle = '#1b1b1b';
-  circle(ctx, 0, 0, r, def.bodyColor, true);
-  for (const s of [-0.6, 0.6]) {
-    const a = angle + s;
-    circle(ctx, Math.cos(a) * r * 0.85, Math.sin(a) * r * 0.85, r * 0.24, '#fbfdff', true);
+  ctx.lineWidth = Math.max(1.5, r * 0.09);
+  ctx.strokeStyle = '#1b1b1b';
+  ctx.fillStyle = '#59453d';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(side * r * 0.36, -r * 0.12, r * 0.28, r * 0.19, 0, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
   }
+  ctx.fillStyle = def.bodyColor;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.78, -r * 0.36);
+  ctx.quadraticCurveTo(-r * 0.82, -r * 1.55, 0, -r * 1.55);
+  ctx.quadraticCurveTo(r * 0.82, -r * 1.55, r * 0.78, -r * 0.36);
+  ctx.quadraticCurveTo(0, -r * 0.02, -r * 0.78, -r * 0.36);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#fbfdff';
+  ctx.fillRect(-r * 0.07, -r * 1.14, r * 0.14, r * 0.81);
+  ctx.translate(Math.cos(angle) * r * 0.3, -r * 0.8);
+  ctx.rotate(angle);
+  weapon(ctx, def.classId, r * 0.75);
+  circle(ctx, r * 0.48, 0, r * 0.24, '#fbfdff', true);
   ctx.restore();
-  drawFaceCached(ctx, def.face, x, y - r * 0.05, r * 0.62, pxScale);
+  drawFaceCached(ctx, def.face, x, y - r * 1.53, r * 0.7, pxScale);
 }
 
 export function drawItemIcon(ctx, item, x, y, r) {
@@ -369,7 +385,7 @@ export function faceCanvas(face, size = 64, cls = 'face-canvas') {
 
 export function eskimoCanvas(def, size = 64, cls = 'face-canvas') {
   const [c, ctx] = hiDpiCanvas(size, cls);
-  drawEskimo(ctx, def, size / 2 - size * 0.08, size / 2, size * 0.28, 0, Math.min(window.devicePixelRatio || 1, 2));
+  drawEskimo(ctx, def, size * 0.45, size * 0.85, size * 0.28, 0, Math.min(window.devicePixelRatio || 1, 2));
   return c;
 }
 

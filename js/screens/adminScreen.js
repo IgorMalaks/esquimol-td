@@ -3,9 +3,10 @@ import { el, toast, clone, getPath, setPath, slugify, uid, confirmDialog } from 
 import { go } from '../core/router.js';
 import { isAdminSession, adminLogout, adminChangePassword } from '../core/auth.js';
 import { storage } from '../core/storage.js';
-import { getData, saveData, resetData, validateData, byId } from '../data/gameData.js';
+import { getData, saveData, resetData, prepareData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES, DEFAULT_FACE } from '../data/defaults.js';
-import { EFFECT_KEYS, BASE_STATS } from '../game/stats.js';
+import { EFFECT_KEYS, BASE_STATS, computeStats } from '../game/stats.js';
+import { ENEMY_TRAITS, roundsHaveAir } from '../game/enemies.js';
 import { rbe, layerChain } from '../core/progression.js';
 import { createFaceEditor } from '../ui/faceEditor.js';
 import { drawEskimo, eskimoCanvas, faceCanvas, itemCanvas } from '../render/faceRenderer.js';
@@ -133,7 +134,7 @@ function eskimoForm(draft) {
   })), 'grid-4');
 
   editor = createFaceEditor(draft.face, {
-    extraPreview: (ctx, face) => drawEskimo(ctx, { ...draft, classId: base.inputs.classId?.value || draft.classId, bodyColor: base.inputs.bodyColor?.value || draft.bodyColor, face }, 140, 165, 85, 0, 1),
+    extraPreview: (ctx, face) => drawEskimo(ctx, { ...draft, classId: base.inputs.classId?.value || draft.classId, bodyColor: base.inputs.bodyColor?.value || draft.bodyColor, face }, 130, 238, 76, 0, 1),
   });
 
   const branchInputs = [0, 1, 2].map((i) => el('input', { value: draft.branches?.[i] || `Caminho ${i + 1}`, maxlength: 30 }));
@@ -193,16 +194,24 @@ function enemyForm(draft) {
     { key: 'childCount', label: 'Quantidade gerada', type: 'number', min: 0, step: 1 },
   ]);
   const editor = createFaceEditor(draft.face);
+  const traits = Object.entries(ENEMY_TRAITS).map(([id, name]) => {
+    const input = el('input', { type: 'checkbox', checked: draft.traits?.includes(id) });
+    return { id, input, label: el('label', {}, input, ` ${name}`) };
+  });
   const chain = draft.id && byId(data.enemies, draft.id)
-    ? layerChain(draft.id, data).map((e, i) => (i ? ` → ${e.name}` : e.name)).join('') + ` · RBE ${rbe(draft.id, data)}`
+    ? layerChain(draft.id, data).map((e) =>
+      [e.name, ...(e.traits ?? []).map((trait) => ENEMY_TRAITS[trait])].join(' · ')
+    ).join(' → ') + ` · RBE ${rbe(draft.id, data)}`
     : 'Salve para ver a cadeia de camadas.';
   return {
     node: el('div', {},
       section('Rosto (Criador Visual)', editor.node),
+      section('Traços', el('div', { class: 'grid-3' }, traits.map((trait) => trait.label))),
       section('Atributos e camadas', f.node, el('p', { class: 'hint', text: `Cadeia: ${chain}. RBE = vidas perdidas se ele escapar.` }))),
     read(target) {
       f.read(target);
       target.face = editor.getFace();
+      target.traits = traits.filter((trait) => trait.input.checked).map((trait) => trait.id);
       target.hp = Math.max(1, target.hp);
       target.dropChance = Math.min(1, Math.max(0, target.dropChance));
       if (!target.childId) target.childCount = 0;
@@ -281,6 +290,10 @@ function phaseForm(draft) {
       f.read(target);
       target.rounds = clone(rounds).map((r) => ({ groups: r.groups.filter((g) => g.count > 0) })).filter((r) => r.groups.length);
       if (!target.rounds.length) throw new Error('A fase precisa de pelo menos uma rodada.');
+      if (roundsHaveAir(target.rounds, data.enemies) && !data.eskimos.some((eskimo) =>
+        (eskimo.unlock?.type ?? 'default') === 'default' && computeStats(eskimo).hitsAir)) {
+        toast('A fase tem inimigos aéreos e nenhum esquimó inicial os atinge.', 'info', 5000);
+      }
     },
   };
 }
@@ -291,6 +304,7 @@ function itemForm(draft) {
     { key: 'name', label: 'Nome' },
     { key: 'type', label: 'Tipo (slot)', type: 'select', options: Object.entries(ITEM_TYPES) },
     { key: 'rarity', label: 'Raridade', type: 'select', options: Object.entries(RARITIES).map(([k, v]) => [k, v.name]) },
+    { key: 'powerTier', label: 'Força dentro da raridade', type: 'select', options: [['1', '1'], ['2', '2'], ['3', '3']] },
     { key: 'classRestriction', label: 'Restrito à classe', type: 'select', options: [['', 'Qualquer classe'], ...Object.entries(CLASSES).map(([k, v]) => [k, v.name])] },
     { key: 'dropWeight', label: 'Peso no sorteio de drop', type: 'number', min: 0, step: 1, hint: '0 = nunca dropa' },
   ]);
@@ -300,6 +314,7 @@ function itemForm(draft) {
     read(target) {
       f.read(target);
       st.read(target);
+      target.powerTier = Number(target.powerTier) || 1;
       for (const k of Object.keys(target.stats)) if (!target.stats[k]) delete target.stats[k];
     },
   };
@@ -313,10 +328,9 @@ function dataTab() {
     if (!file) return;
     try {
       if (file.size > 2_000_000) throw new Error('Arquivo muito grande.');
-      const parsed = JSON.parse(await file.text());
-      validateData(parsed);
+      const parsed = prepareData(JSON.parse(await file.text()));
       if (!(await confirmDialog('Substituir TODO o conteúdo atual pelo arquivo importado?', { danger: true, okLabel: 'Importar' }))) return;
-      saveData({ ...parsed, version: getData().version });
+      saveData(parsed, { replace: true });
       toast('Conteúdo importado.', 'success');
       render();
     } catch (e) { toast(`Importação falhou: ${e.message}`, 'error', 4000); } finally { fileInput.value = ''; }

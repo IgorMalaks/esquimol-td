@@ -1,18 +1,19 @@
 // Menu pré-partida: Fases, Quartel (árvore + equipamentos) e Inventário.
-import { el, toast } from '../core/utils.js';
+import { el, toast, confirmDialog } from '../core/utils.js';
 import { go } from '../core/router.js';
 import { currentAccount, logout, saveAccount } from '../core/auth.js';
 import { getData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES } from '../data/defaults.js';
 import {
   ensureProgress, phaseUnlocked, unlockText, equippedItems, instanceItem, whoEquips,
-  canEquip, equip, unequip, SLOTS,
+  canEquip, equip, unequip, fuseItems, SLOTS,
 } from '../core/progression.js';
 import {
   computeStats, skillPoints, pointsFree, canLearn, canUnlearn, effectText, itemStatsText,
   STAT_LABELS, XP_PER_POINT, MAX_POINTS,
 } from '../game/stats.js';
 import { eskimoCanvas, itemCanvas } from '../render/faceRenderer.js';
+import { economy, fusionPool } from '../game/economy.js';
 
 const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
@@ -48,7 +49,12 @@ export function menuScreen(root, params = {}) {
           class: 'btn btn-primary', text: open ? 'Jogar' : 'Bloqueada', disabled: !open,
           onclick: () => go('game', { phaseId: ph.id }),
         }));
-    }));
+    }),
+    el('div', { class: 'card phase-card' },
+      el('h3', { text: 'Modo Infinito' }),
+      el('p', { text: `Recorde: rodada ${acc.progress.endlessBest?.melhorWave ?? 0}` }),
+      el('p', { class: 'muted', text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
+      el('button', { class: 'btn btn-primary', text: 'Jogar Infinito', onclick: () => go('game', { endless: true }) })));
   }
 
   // ---------- Quartel ----------
@@ -149,7 +155,30 @@ export function menuScreen(root, params = {}) {
   function inventoryView() {
     const inv = acc.progress.inventory;
     if (!inv.length) return el('div', { class: 'card' }, el('p', { text: 'Seu inventário está vazio. Toque nos drops durante as partidas para coletar itens.' }));
-    return el('div', { class: 'card' }, el('ul', { class: 'item-list' }, inv.map((inst) => {
+    const free = new Map();
+    for (const instance of inv) {
+      if (whoEquips(acc, instance.uid)) continue;
+      if (!free.has(instance.itemId)) free.set(instance.itemId, []);
+      free.get(instance.itemId).push(instance.uid);
+    }
+    const chance = Math.round(economy(data).fusionChance * 100);
+    const fusion = [...free].filter(([id, copies]) => copies.length >= 3 && fusionPool(data, byId(data.items, id)).length)
+      .map(([id, copies]) => {
+        const item = byId(data.items, id);
+        return el('button', { class: 'btn btn-small', text: `Fundir 3 × ${item.name}`, onclick: async () => {
+          if (!(await confirmDialog(`A fusão tem ${chance}% de chance de gerar um item de raridade superior. Se falhar, você perde duas cópias.`,
+            { okLabel: 'Fundir', danger: true }))) return;
+          try {
+            const result = fuseItems(acc, copies.slice(0, 3));
+            toast(result ? `Você obteve ${result.name}!` : 'A fusão falhou. Uma cópia foi devolvida.', result ? 'success' : 'info');
+            render();
+          } catch (error) { toast(error.message, 'error'); }
+        } });
+      });
+    return el('div', { class: 'card' }, el('h3', { text: 'Fusão' }),
+      fusion.length ? el('div', { class: 'form-actions' }, fusion) :
+        el('p', { class: 'muted', text: 'Junte três cópias desequipadas de um item para fundir.' }),
+      el('ul', { class: 'item-list' }, inv.map((inst) => {
       const item = instanceItem(acc, inst.uid);
       const owner = whoEquips(acc, inst.uid);
       return el('li', { class: `rarity-${item.rarity}` },
