@@ -1,0 +1,134 @@
+/* Esquimó TD — Design Tokens v0.1
+   Fonte única de cor, tipo, forma e movimento. Componentes (ds.css) só usam estes tokens. */
+:root {
+  /* ---------- Tinta e neve ---------- */
+  --ink: #10233a;
+  --ink-2: #3d5470;
+  --ink-3: #5a7088;
+  --snow: #ffffff;
+
+  /* ---------- Gelo (cor principal) ---------- */
+  --frost-50: #f4faff;
+  --frost-100: #e4f3ff;
+  --frost-200: #c8e7ff;
+  --frost-300: #9dd3fb;
+  --frost-400: #5db5f1;
+  --frost-500: #2280c8;
+  --frost-600: #1b74bb;
+  --frost-700: #135892;
+
+  /* ---------- Aurora (acentos decorativos, nunca texto) ---------- */
+  --aurora-mint: #3fe0b3;
+  --aurora-violet: #8b6cff;
+  --aurora-pink: #ff70b0;
+
+  /* ---------- Ação e estado ---------- */
+  --gold-300: #ffe08a;
+  --gold-500: #ffc93c;
+  --gold-700: #c98a00;
+  --go-500: #1f8a47;
+  --go-700: #16683a;
+  --danger-500: #d63a50;
+  --danger-700: #a8223a;
+  --warn-500: #ff9f1c;
+  --focus: #ffd84d;
+
+  /* ---------- Raridade ---------- */
+  --r-common: #9aa7b4;
+  --r-uncommon: #3fbf62;
+  --r-rare: #3b8ff0;
+  --r-epic: #b47cf6;
+  --r-legendary: #ff9f1c;
+  --r-mythic: #ff3d6e;
+
+  /* ---------- Semânticos ---------- */
+  --surface: var(--snow);
+  --surface-2: var(--frost-50);
+  --surface-3: var(--frost-100);
+  --text: var(--ink);
+  --text-muted: var(--ink-2);
+  --line: var(--ink);
+
+  /* ---------- Tipografia (fontes do sistema: zero download, zero dependência) ---------- */
+  --font-display: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", "Nunito", "Trebuchet MS", system-ui, sans-serif;
+  --font-body: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-num: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --fs-xs: .75rem;
+  --fs-sm: .875rem;
+  --fs-md: 1rem;
+  --fs-lg: 1.25rem;
+  --fs-xl: 1.6rem;
+  --fs-2xl: 2.2rem;
+  --fs-hero: clamp(2.8rem, 8vw, 4.6rem);
+
+  /* ---------- Espaço (base 4) ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 48px;
+
+  /* ---------- Forma ---------- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 26px;
+  --r-pill: 999px;
+  --bw: 3px;
+  --bw-sm: 2px;
+
+  /* ---------- Profundidade ---------- */
+  --lift-1: 0 3px 0 var(--ink);
+  --lift-2: 0 5px 0 var(--ink);
+  --lift-pressed: 0 1px 0 var(--ink);
+  --soft-1: 0 8px 24px rgba(16, 35, 58, .12);
+  --soft-2: 0 18px 50px rgba(16, 35, 58, .22);
+  --glow-gold: 0 0 0 3px rgba(255, 201, 60, .35), 0 0 24px rgba(255, 201, 60, .55);
+
+  /* ---------- Movimento ---------- */
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --t-fast: 120ms;
+  --t-med: 220ms;
+  --t-slow: 420ms;
+
+  /* ---------- Toque e camadas ---------- */
+  --tap-min: 44px;
+  --z-hud: 10;
+  --z-panel: 20;
+  --z-modal: 90;
+  --z-toast: 100;
+}
+
+/* Ângulo animável (borda arco-íris do Mítico) */
+@property --ds-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-fast: 0ms; --t-med: 0ms; --t-slow: 0ms; }
+}
+
+/* ---------- Elementos (SPEC-017). Sempre acompanhados de nome/ícone. ---------- */
+:root {
+  --el-perfurante: #8d98a4;
+  --el-impacto: #a8896a;
+  --el-gelo: #5fa8d3;
+  --el-fogo: #d0643a;
+  --el-raio: #d9b53a;
+  --el-arcano: #9a6fd0;
+  --el-neutro: #b4bcc6;
+  --el-pedra: #8f7a62;
+  --el-natureza: #5e9a5a;
+  --el-tempestade: #4f7fa6;
+  --el-sombra: #5b4f7a;
+}
+
+
+/* ---------- Filtro quente (conforto visual, desligável pelo jogador) ---------- */
+:root { --warm-tint: rgba(255, 214, 140, .16); }

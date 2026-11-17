@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR" data-fx="full" data-tone="warm">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Admin · Esquimós — Esquimó TD</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/ds.css">
+  <link rel="stylesheet" href="design-system.page.css">
+  <link rel="stylesheet" href="admin.page.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2.5v19M3.8 7.2l16.4 9.6M20.2 7.2 3.8 16.8"/></symbol>
+  </svg>
+
+  <header class="ad-top">
+    <div class="ad-brand"><span class="ds-logo ad-logo">Esquimó<span>TD</span></span><span class="ds-badge ds-badge--dark">Admin</span></div>
+    <nav class="ad-tabs" id="tabs" aria-label="Abas do admin"></nav>
+    <label class="ad-tone">Filtro quente <input type="checkbox" class="ds-switch" role="switch" id="tone" checked></label>
+    <a class="ds-btn ds-btn--sm ds-btn--ghost" href="design-system.html">Design system</a>
+  </header>
+
+  <div class="ad-layout">
+    <aside class="ad-list" aria-label="Esquimós cadastrados">
+      <button class="ds-btn ds-btn--primary ds-btn--block" id="new" type="button">+ Novo esquimó</button>
+      <input class="ds-input ds-input--sm" id="search" placeholder="Buscar por nome" aria-label="Buscar">
+      <div id="list"></div>
+    </aside>
+    <main class="ad-editor" id="editor"></main>
+  </div>
+
+  <footer class="ad-foot">
+    <span class="ad-dirty" id="dirty"></span>
+    <div class="ad-issues" id="issues" aria-live="polite"></div>
+    <button class="ds-btn ds-btn--ghost ds-btn--sm" id="discard" type="button">Descartar</button>
+    <button class="ds-btn ds-btn--sm" id="export" type="button">Exportar JSON</button>
+    <button class="ds-btn ds-btn--go" id="save" type="button">Salvar</button>
+  </footer>
+
+  <div class="ds-toast-root" id="toasts" aria-live="polite"></div>
+  <script type="module" src="admin-esquimo.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "esquimo-td",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tower defense de navegador com esquimós e rostos em camadas. Sem dependências.",
+  "scripts": {
+    "start": "python3 -m http.server 5173 --bind 127.0.0.1",
+    "test": "node --test tests/*.test.js"
+  }
+}

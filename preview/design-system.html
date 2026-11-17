@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="pt-BR" data-fx="full" data-tone="warm">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Design System — Esquimó TD</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/ds.css">
+  <link rel="stylesheet" href="design-system.page.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.5 4.2 12.9A4.9 4.9 0 0 1 12 6.8a4.9 4.9 0 0 1 7.8 6.1z"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.2" fill="rgba(255,255,255,.55)"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 21V3.5"/><path d="M6 4h11l-2.4 3.6L17 11H6z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4.2"/><path d="M12.2 12H21M18 12v3.2M21 12v2.4" fill="none"/></symbol>
+    <symbol id="i-sword" viewBox="0 0 24 24"><path d="M19 3h2v2L11 15l-2-2z"/><path d="M6 12.5l5.5 5.5M8.6 15.4 4 20" fill="none"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2.8 19.5 5.6v5.6c0 4.7-3.2 8.6-7.5 10.2-4.3-1.6-7.5-5.5-7.5-10.2V5.6z"/></symbol>
+    <symbol id="i-gem" viewBox="0 0 24 24"><path d="M12 3 19 10 12 21 5 10z"/><path d="M5 10h14" fill="none"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2.5l2.7 6.2 6.7.6-5.1 4.4 1.5 6.6L12 16.9l-5.8 3.4 1.5-6.6-5.1-4.4 6.7-.6z"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><path d="M12 2.5v19M3.8 7.2l16.4 9.6M20.2 7.2 3.8 16.8M9.5 4l2.5 2 2.5-2M9.5 20l2.5-2 2.5 2" fill="none"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  </svg>
+
+  <canvas id="ds-snow" aria-hidden="true"></canvas>
+  <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+  <header class="pg-hero">
+    <p class="pg-eyebrow">Design System · v0.3 · proposta para aprovação</p>
+    <h1 class="ds-logo">Esquimó<span>TD</span></h1>
+    <p class="pg-lead">Gelo, tinta e brilho. Cartoon nas peças do jogo, limpo em tudo que é leitura.</p>
+    <div class="pg-hero-chars" id="hero-chars" aria-hidden="true"></div>
+    <div class="pg-fx-group">
+    <div class="pg-fx">
+      <div class="ds-seg" role="tablist" aria-label="Filtro de cor" data-seg="tone">
+        <button role="tab" data-value="warm" aria-selected="true">Filtro quente</button>
+        <button role="tab" data-value="none" aria-selected="false">Sem filtro</button>
+      </div>
+      <small>Amarelado leve por cima de tudo. Vira opção do jogador.</small>
+    </div>
+    <div class="pg-fx">
+      <div class="ds-seg" role="tablist" aria-label="Intensidade dos efeitos" data-seg="fx">
+        <button role="tab" data-value="full" aria-selected="true">Efeitos completos</button>
+        <button role="tab" data-value="subtle" aria-selected="false">Sutil</button>
+        <button role="tab" data-value="off" aria-selected="false">Sem animação</button>
+      </div>
+      <small>Isso vira uma opção do jogador nas configurações.</small>
+    </div>
+    </div>
+    <a class="ds-btn ds-btn--primary" href="admin-esquimo.html">Ver painel de criação de esquimós</a>
+  </header>
+
+  <nav class="pg-nav" aria-label="Seções">
+    <a href="#principios">Princípios</a><a href="#cor">Cor</a><a href="#raridade">Raridade</a><a href="#elementos">Elementos</a><a href="#tipo">Tipografia</a>
+    <a href="#forma">Forma</a><a href="#movimento">Movimento</a><a href="#botoes">Botões</a><a href="#forms">Formulários</a>
+    <a href="#superficies">Superfícies</a><a href="#arena">Arena</a><a href="#progressao">Progressão</a>
+    <a href="#feedback">Feedback</a><a href="#a11y">Acessibilidade</a><a href="#aprovar">Aprovar</a>
+  </nav>
+
+  <main class="pg-main">
+    <!-- 01 -->
+    <section class="pg-sec" id="principios">
+      <div class="pg-sec__head"><span class="pg-sec__num">01</span><h2>Princípios</h2></div>
+      <p class="pg-sec__desc">Cinco regras que decidem qualquer dúvida de visual. Se um componente novo quebra uma delas, ele está errado.</p>
+      <div class="pg-grid" style="--min:190px">
+        <div class="ds-card ds-card--frost pg-principle"><span class="pg-n">1</span><b>Tinta é para tocar</b><p>Contorno escuro grosso e sombra "de degrau" só em coisa do jogo ou clicável. Texto e painéis ficam em vidro claro, sem contorno. É isso que mantém limpo.</p></div>
+        <div class="ds-card ds-card--frost pg-principle"><span class="pg-n">2</span><b>Movimento responde</b><p>Mola nos feedbacks de ação (apertar, comprar, estourar). Nada se mexe enquanto você lê. Nada passa de 0,8 s.</p></div>
+        <div class="ds-card ds-card--frost pg-principle"><span class="pg-n">3</span><b>Cor nunca sozinha</b><p>Raridade e estado sempre têm rótulo ou ícone junto da cor. Daltônico joga igual.</p></div>
+        <div class="ds-card ds-card--frost pg-principle"><span class="pg-n">4</span><b>Dedo primeiro</b><p>Alvo mínimo de 44 px, ações principais embaixo no celular, nada que dependa só de passar o mouse.</p></div>
+        <div class="ds-card ds-card--frost pg-principle"><span class="pg-n">5</span><b>Brilho é recompensa</b><p>Efeito forte (aura, arco-íris, explosão de luz) só para o que é raro. Se tudo brilha, nada brilha.</p></div>
+      </div>
+    </section>
+
+    <!-- 02 -->
+    <section class="pg-sec" id="cor">
+      <div class="pg-sec__head"><span class="pg-sec__num">02</span><h2>Cor</h2></div>
+      <p class="pg-sec__desc">Azul-gelo é a marca; tinta é o contorno; dourado é ação e recompensa. Aurora é só decoração de fundo, nunca texto. Clique numa cor para copiar o token.</p>
+      <p class="pg-label">Gelo</p>
+      <div class="pg-grid" style="--min:118px" data-swatches="--frost-50 --frost-100 --frost-200 --frost-300 --frost-400 --frost-500 --frost-600 --frost-700"></div>
+      <p class="pg-label">Tinta e neve</p>
+      <div class="pg-grid" style="--min:118px" data-swatches="--ink --ink-2 --ink-3 --snow"></div>
+      <p class="pg-label">Ação e estado</p>
+      <div class="pg-grid" style="--min:118px" data-swatches="--gold-300 --gold-500 --gold-700 --go-500 --go-700 --danger-500 --danger-700 --warn-500 --focus"></div>
+      <p class="pg-label">Aurora (decorativa)</p>
+      <div class="pg-grid" style="--min:118px" data-swatches="--aurora-mint --aurora-violet --aurora-pink"></div>
+    </section>
+
+    <!-- 03 -->
+    <section class="pg-sec" id="raridade">
+      <div class="pg-sec__head"><span class="pg-sec__num">03</span><h2>Raridade</h2></div>
+      <p class="pg-sec__desc">Seis níveis. A intensidade do efeito sobe junto com a raridade: Comum é plano, Lendário pulsa, Mítico tem borda arco-íris girando e reflexo holográfico. Passe o mouse para inclinar o card. As chances são as da tabela normal da SPEC-010.</p>
+      <div class="pg-row pg-row--items">
+        <article class="ds-item r-common"><span class="ds-item__tag">Comum</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-shield"/></svg></span><span class="ds-item__name">Parka Reforçada</span><span class="ds-item__stat">+10 alcance</span><span class="ds-item__odds">55%</span></article>
+        <article class="ds-item r-uncommon"><span class="ds-item__tag">Incomum</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-sword"/></svg></span><span class="ds-item__name">Neve Compactada</span><span class="ds-item__stat">+15 área</span><span class="ds-item__odds">25%</span></article>
+        <article class="ds-item r-rare"><span class="ds-item__tag">Raro</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-sword"/></svg></span><span class="ds-item__name">Arco Rúnico</span><span class="ds-item__stat">+1 dano · +10% alcance</span><span class="ds-item__odds">13%</span></article>
+        <article class="ds-item r-epic"><span class="ds-item__tag">Épico</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-star"/></svg></span><span class="ds-item__name">Nevasca</span><span class="ds-item__stat">Habilidade · recarga 75 s</span><span class="ds-item__odds">6%</span></article>
+        <article class="ds-item ds-item--legendary r-legendary"><span class="ds-item__tag">Lendário</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-gem"/></svg></span><span class="ds-item__name">Cajado Boreal</span><span class="ds-item__stat">+1 dano · +15% lentidão</span><span class="ds-item__odds">0,9%</span></article>
+        <article class="ds-item ds-item--mythic r-mythic"><span class="ds-item__tag">Mítico</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-crown"/></svg></span><span class="ds-item__name">Coração da Aurora</span><span class="ds-item__stat">+25% tudo</span><span class="ds-item__odds">só chefe de raide</span></article>
+      </div>
+    </section>
+
+    <!-- EL -->
+    <section class="pg-sec" id="elementos">
+      <div class="pg-sec__head"><span class="pg-sec__num">04</span><h2>Elementos</h2></div>
+      <p class="pg-sec__desc">Cada esquimó causa um tipo de dano e cada camada de inimigo tem um elemento (SPEC-017). O selo é sempre losango colorido + nome, nunca só a cor. Toque nos botões para ver o retorno de acerto eficaz e de resistência.</p>
+      <div class="pg-split">
+        <div class="ds-card ds-card--frost">
+          <p class="pg-label" style="margin-top:0">Tipos de dano (esquimós)</p>
+          <div class="pg-row"><span class="ds-el" style="--ec:var(--el-perfurante)">Perfurante</span><span class="ds-el" style="--ec:var(--el-impacto)">Impacto</span><span class="ds-el" style="--ec:var(--el-gelo)">Gelo</span><span class="ds-el" style="--ec:var(--el-fogo)">Fogo</span><span class="ds-el" style="--ec:var(--el-raio)">Raio</span><span class="ds-el" style="--ec:var(--el-arcano)">Arcano</span></div>
+          <p class="pg-label">Elementos de inimigo</p>
+          <div class="pg-row"><span class="ds-el" style="--ec:var(--el-neutro)">Neutro</span><span class="ds-el" style="--ec:var(--el-gelo)">Gelo</span><span class="ds-el" style="--ec:var(--el-fogo)">Fogo</span><span class="ds-el" style="--ec:var(--el-pedra)">Pedra</span><span class="ds-el" style="--ec:var(--el-natureza)">Natureza</span><span class="ds-el" style="--ec:var(--el-tempestade)">Tempestade</span><span class="ds-el" style="--ec:var(--el-sombra)">Sombra</span></div>
+        </div>
+        <div class="ds-card">
+          <div class="pg-enemy__head"><span id="golem"></span><div><b>Golem de Gelo</b><small>Caverna de Cristal · Blindado</small></div><span class="ds-el" style="--ec:var(--el-gelo)">Gelo</span></div>
+          <p class="pg-label">Fraco contra</p>
+          <div class="pg-row"><span class="ds-el ds-el--weak" style="--ec:var(--el-fogo)" data-mult="×1,75">Fogo</span><span class="ds-el ds-el--weak" style="--ec:var(--el-impacto)" data-mult="×1,25">Impacto</span></div>
+          <p class="pg-label">Resiste a</p>
+          <div class="pg-row"><span class="ds-el ds-el--resist" style="--ec:var(--el-gelo)" data-mult="×0,25">Gelo</span></div>
+          <div class="pg-row" style="margin-top:16px"><button class="ds-btn ds-btn--sm" data-hit="1.75">Acertar com Fogo</button><button class="ds-btn ds-btn--sm" data-hit="0.25">Acertar com Gelo</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 -->
+    <section class="pg-sec" id="tipo">
+      <div class="pg-sec__head"><span class="pg-sec__num">05</span><h2>Tipografia</h2></div>
+      <p class="pg-sec__desc">Uma família arredondada do próprio sistema (SF Pro Rounded no Apple, Nunito/Trebuchet como reserva). Zero download de fonte. Números sempre tabulares para o ouro não "dançar" ao mudar.</p>
+      <div class="ds-card ds-card--frost">
+        <div class="pg-type"><code>Display · --fs-hero · 900</code><span class="ds-logo" style="font-size:var(--fs-2xl)">Vitória!</span></div>
+        <div class="pg-type"><code>Título XL · --fs-xl · 900</code><span style="font:900 var(--fs-xl) var(--font-display)">Caverna de Cristal</span></div>
+        <div class="pg-type"><code>Título L · --fs-lg · 800</code><span style="font:800 var(--fs-lg) var(--font-display)">Árvore de habilidades</span></div>
+        <div class="pg-type"><code>Corpo · --fs-md · 500</code><span>Arraste um esquimó até o mapa ou toque nele e depois no lugar onde quer posicionar.</span></div>
+        <div class="pg-type"><code>Pequeno · --fs-sm · 600</code><span style="font-size:var(--fs-sm);font-weight:600;color:var(--ink-2)">Só um caminho pode chegar ao nível 3.</span></div>
+        <div class="pg-type"><code>Números · --font-num · tabular</code><span style="font:900 var(--fs-xl) var(--font-num);font-variant-numeric:tabular-nums">1.111 · 8.888 ouro</span></div>
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section class="pg-sec" id="forma">
+      <div class="pg-sec__head"><span class="pg-sec__num">06</span><h2>Forma, profundidade e espaço</h2></div>
+      <p class="pg-sec__desc">Cantos generosos e sombra "dura" (deslocada, sem desfoque) para peças do jogo, que parecem botões de verdade. Sombra macia só para o que flutua (modal, toast, vidro).</p>
+      <div class="pg-split">
+        <div class="ds-card ds-card--frost">
+          <p class="pg-label" style="margin-top:0">Raios</p>
+          <div class="pg-row">
+            <span class="pg-shape" style="border-radius:var(--r-sm)">sm 8</span><span class="pg-shape" style="border-radius:var(--r-md)">md 12</span>
+            <span class="pg-shape" style="border-radius:var(--r-lg)">lg 18</span><span class="pg-shape" style="border-radius:var(--r-xl)">xl 26</span>
+          </div>
+          <p class="pg-label">Profundidade</p>
+          <div class="pg-row">
+            <span class="pg-shadow" style="border:2px solid var(--ink);box-shadow:var(--lift-1)">lift-1</span>
+            <span class="pg-shadow" style="border:3px solid var(--ink);box-shadow:var(--lift-2)">lift-2</span>
+            <span class="pg-shadow" style="box-shadow:var(--soft-1)">soft-1</span>
+            <span class="pg-shadow" style="box-shadow:var(--soft-2)">soft-2</span>
+          </div>
+        </div>
+        <div class="ds-card ds-card--frost">
+          <p class="pg-label" style="margin-top:0">Espaço (base 4)</p>
+          <div style="display:grid;gap:8px">
+            <div class="pg-space">sp-1 4<i style="--w:4px"></i></div><div class="pg-space">sp-2 8<i style="--w:8px"></i></div>
+            <div class="pg-space">sp-3 12<i style="--w:12px"></i></div><div class="pg-space">sp-4 16<i style="--w:16px"></i></div>
+            <div class="pg-space">sp-5 20<i style="--w:20px"></i></div><div class="pg-space">sp-6 24<i style="--w:24px"></i></div>
+            <div class="pg-space">sp-7 32<i style="--w:32px"></i></div><div class="pg-space">sp-8 48<i style="--w:48px"></i></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 -->
+    <section class="pg-sec" id="movimento">
+      <div class="pg-sec__head"><span class="pg-sec__num">07</span><h2>Movimento</h2></div>
+      <p class="pg-sec__desc">Duas curvas só. <b>Mola</b> (passa um pouco do ponto e volta) para tudo que é ação do jogador. <b>Saída suave</b> para entrar e sair de tela. Durações: rápido 120 ms, médio 220 ms, lento 420 ms. Toque numa pista para ver.</p>
+      <div class="ds-card ds-card--frost pg-motion">
+        <div class="pg-track" style="--e:var(--ease-spring)" tabindex="0" role="button"><i class="pg-ball"></i><span>--ease-spring · botões, cards, compra, estouro</span></div>
+        <div class="pg-track" style="--e:var(--ease-out)" tabindex="0" role="button"><i class="pg-ball"></i><span>--ease-out · telas, modais, barras</span></div>
+        <div class="pg-track" style="--e:linear" tabindex="0" role="button"><i class="pg-ball"></i><span>linear · só recarga e cronômetro</span></div>
+        <div><button class="ds-btn ds-btn--sm" id="motion-all">Reproduzir todos</button></div>
+      </div>
+    </section>
+
+    <!-- 07 -->
+    <section class="pg-sec" id="botoes">
+      <div class="pg-sec__head"><span class="pg-sec__num">08</span><h2>Botões</h2></div>
+      <p class="pg-sec__desc">Botão "de gel": brilho no topo, afunda ao apertar, reflexo que varre ao passar o mouse. Uma cor por intenção: <b>verde</b> = avançar no jogo, <b>azul</b> = ação principal, <b>dourado</b> = comprar/recompensa, <b>vermelho</b> = destruir/sair.</p>
+      <div class="ds-card ds-card--frost">
+        <p class="pg-label" style="margin-top:0">Variantes</p>
+        <div class="pg-row">
+          <button class="ds-btn ds-btn--go">Iniciar rodada</button>
+          <button class="ds-btn ds-btn--primary">Jogar</button>
+          <button class="ds-btn ds-btn--gold">Comprar · 150</button>
+          <button class="ds-btn">Quartel</button>
+          <button class="ds-btn ds-btn--danger">Vender</button>
+          <button class="ds-btn ds-btn--ghost">Cancelar</button>
+        </div>
+        <p class="pg-label">Tamanhos e estados</p>
+        <div class="pg-row">
+          <button class="ds-btn ds-btn--primary ds-btn--sm">Pequeno</button>
+          <button class="ds-btn ds-btn--primary">Médio</button>
+          <button class="ds-btn ds-btn--go ds-btn--lg">Grande</button>
+          <button class="ds-btn ds-btn--primary" disabled>Desabilitado</button>
+          <button class="ds-btn ds-btn--primary" id="btn-load">Salvar (carregando)</button>
+          <span class="ds-tip" data-tip="Pausar (P)"><button class="ds-btn ds-btn--icon" aria-label="Pausar"><svg class="ds-ico ds-ico--line" style="color:var(--ink)" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button></span>
+          <span class="ds-tip" data-tip="Velocidade 2x (F)"><button class="ds-btn ds-btn--icon ds-btn--gold" aria-label="Velocidade"><svg class="ds-ico"><use href="#i-bolt"/></svg></button></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 08 -->
+    <section class="pg-sec" id="forms">
+      <div class="pg-sec__head"><span class="pg-sec__num">09</span><h2>Formulários</h2></div>
+      <p class="pg-sec__desc">Campos altos (44 px), foco com halo azul bem visível, erro com tremida curta e mensagem embaixo. Abas viram "pílula" com indicador dourado deslizando.</p>
+      <div class="pg-split">
+        <div class="ds-card ds-card--frost" style="display:grid;gap:14px">
+          <div class="ds-field">
+            <label for="f-user">Usuário</label>
+            <input class="ds-input" id="f-user" placeholder="seu_nome" autocomplete="off" aria-describedby="f-user-err">
+            <span class="ds-error" id="f-user-err" role="alert"></span>
+          </div>
+          <div class="ds-field">
+            <label for="f-pass">Senha</label>
+            <input class="ds-input" id="f-pass" type="password" placeholder="mínimo 6 caracteres" autocomplete="new-password">
+            <span class="ds-help">Fica guardada só como hash.</span>
+          </div>
+          <div class="ds-field">
+            <label for="f-class">Classe</label>
+            <select class="ds-input" id="f-class"><option>Arqueiro</option><option>Lançador de Bolas de Neve</option><option>Arpoador</option><option>Mago do Gelo</option><option>Domador (invocador)</option><option>Xamã (suporte)</option></select>
+          </div>
+        </div>
+        <div class="ds-card ds-card--frost" style="display:grid;gap:18px;align-content:start">
+          <div class="ds-field">
+            <span class="ds-label">Abas</span>
+            <div class="ds-seg" role="tablist" data-seg="menu">
+              <button role="tab" aria-selected="true">Fases</button><button role="tab" aria-selected="false">Quartel</button><button role="tab" aria-selected="false">Inventário</button><button role="tab" aria-selected="false">Amigos</button>
+            </div>
+          </div>
+          <label class="pg-row" style="justify-content:space-between;font-weight:800">Sons <input type="checkbox" class="ds-switch" role="switch" checked></label>
+          <label class="pg-row" style="justify-content:space-between;font-weight:800">Iniciar rodadas automaticamente <input type="checkbox" class="ds-switch" role="switch"></label>
+          <div class="ds-field">
+            <label for="f-tilt" style="display:flex;justify-content:space-between">Inclinação da câmera <output for="f-tilt"></output></label>
+            <input class="ds-range" id="f-tilt" type="range" min="0.45" max="1" step="0.01" value="0.95">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 09 -->
+    <section class="pg-sec" id="superficies">
+      <div class="pg-sec__head"><span class="pg-sec__num">10</span><h2>Superfícies</h2></div>
+      <p class="pg-sec__desc">Dois tipos, com papéis diferentes. É a regra que mais segura o visual limpo.</p>
+      <div class="pg-split">
+        <div class="ds-card" style="display:grid;gap:10px">
+          <b style="font:900 var(--fs-lg) var(--font-display)">Card "tinta"</b>
+          <p style="margin:0;color:var(--ink-2)">Peças do jogo: painel da torre, card de fase, janela de trade. Contorno grosso + sombra dura. Parece um objeto que dá para pegar.</p>
+          <div class="pg-row"><span class="ds-badge ds-badge--gold">Nv 3</span><span class="ds-badge ds-badge--go">Concluída</span><span class="ds-badge ds-badge--danger">Chefe</span><span class="ds-badge ds-badge--info">8 rodadas</span><span class="ds-badge ds-badge--dark">Coop 2/4</span></div>
+        </div>
+        <div class="ds-card ds-card--frost" style="display:grid;gap:10px">
+          <b style="font:900 var(--fs-lg) var(--font-display)">Card "vidro"</b>
+          <p style="margin:0;color:var(--ink-2)">Conteúdo e leitura: menus, configurações, textos, listas longas. Translúcido, desfoca o fundo, sem contorno. Some para o conteúdo aparecer.</p>
+          <div class="pg-row"><span class="ds-tip" data-tip="Dica em qualquer elemento"><span class="ds-badge">Passe o mouse aqui</span></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 -->
+    <section class="pg-sec" id="arena">
+      <div class="pg-sec__head"><span class="pg-sec__num">11</span><h2>Arena (HUD)</h2></div>
+      <p class="pg-sec__desc">Como os componentes ficam juntos durante a partida. Os esquimós são os mesmos desenhados pelo jogo. Use os botões para ver os efeitos: dano no chefe com rastro branco, ouro subindo e habilidades com recarga (Q/E).</p>
+      <div class="pg-arena">
+        <div class="pg-arena__hud">
+          <div class="pg-row">
+            <span class="ds-stat ds-stat--lives"><svg class="ds-ico"><use href="#i-heart"/></svg>100</span>
+            <span class="ds-stat ds-stat--gold" id="gold-stat"><svg class="ds-ico"><use href="#i-coin"/></svg><span id="gold-val">650</span></span>
+            <span class="ds-stat ds-stat--wave"><svg class="ds-ico"><use href="#i-flag"/></svg>4/8</span>
+            <span class="ds-stat ds-stat--keys"><svg class="ds-ico"><use href="#i-key"/></svg>2</span>
+          </div>
+          <div class="pg-row">
+            <div class="ds-seg ds-seg--sm" role="tablist" data-seg="speed"><button role="tab" aria-selected="true">1x</button><button role="tab" aria-selected="false">2x</button></div>
+            <button class="ds-btn ds-btn--go ds-btn--sm">Iniciar rodada</button>
+          </div>
+        </div>
+        <div class="pg-arena__body">
+          <div class="pg-arena__field">
+            <div class="ds-card ds-card--frost pg-boss-wrap">
+              <div class="ds-boss" id="boss">
+                <div class="ds-boss__head"><svg class="ds-ico"><use href="#i-crown"/></svg>Rei Iceberg<output id="boss-pct">100%</output></div>
+                <div class="ds-boss__bar"><div class="ds-boss__trail"></div><div class="ds-boss__hp"></div><i class="ds-boss__mark" style="left:66%"></i><i class="ds-boss__mark" style="left:33%"></i></div>
+              </div>
+            </div>
+            <div class="pg-row" style="justify-content:space-between;align-items:flex-end">
+              <div class="pg-row" style="gap:18px">
+                <button class="ds-skill r-epic" data-cd="8" data-start="0" data-name="Nevasca" aria-label="Nevasca"><svg class="ds-ico"><use href="#i-snow"/></svg><span class="ds-skill__cd"></span><span class="ds-skill__key">Q</span></button>
+                <button class="ds-skill r-legendary" data-cd="12" data-start="7" data-name="Chuva de Flechas" aria-label="Chuva de Flechas"><svg class="ds-ico"><use href="#i-star"/></svg><span class="ds-skill__cd"></span><span class="ds-skill__key">E</span></button>
+              </div>
+              <div class="pg-row">
+                <button class="ds-btn ds-btn--danger ds-btn--sm" id="boss-hit">Acertar o chefe</button>
+                <button class="ds-btn ds-btn--gold ds-btn--sm" id="gold-add">+ ouro</button>
+              </div>
+            </div>
+          </div>
+          <aside class="pg-arena__tray" aria-label="Esquimós">
+            <div class="ds-tower" data-tower="0"><span data-name></span><span class="ds-tower__cost" data-cost></span></div>
+            <div class="ds-tower is-active" data-tower="1"><span data-name></span><span class="ds-tower__cost" data-cost></span></div>
+            <div class="ds-tower" data-tower="2"><span data-name></span><span class="ds-tower__cost" data-cost></span></div>
+            <div class="ds-tower is-poor" data-tower="3"><span data-name></span><span class="ds-tower__cost" data-cost></span></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 -->
+    <section class="pg-sec" id="progressao">
+      <div class="pg-sec__head"><span class="pg-sec__num">12</span><h2>Progressão</h2></div>
+      <p class="pg-sec__desc">Árvore com três estados que dá para distinguir sem cor: aprendido (verde e cheio), disponível (borda dourada pulsando), bloqueado (tracejado listrado). Toque nos nós disponíveis.</p>
+      <div class="pg-split">
+        <div class="ds-card ds-card--frost">
+          <div class="pg-grid" style="--min:150px" id="tree">
+            <div class="ds-branch"><h4>Perfurantes</h4>
+              <button class="ds-node is-learned"><span class="ds-node__tier">1</span><b>Ponta Afiada</b><small>+1 perfuração</small></button>
+              <button class="ds-node is-available"><span class="ds-node__tier">2</span><b>Flecha Lança</b><small>+2 perfuração</small></button>
+              <button class="ds-node is-blocked" data-reason="Aprenda o nível anterior do caminho"><span class="ds-node__tier">3</span><b>Flecha Suprema</b><small>+2 dano</small></button>
+            </div>
+            <div class="ds-branch"><h4>Chuva</h4>
+              <button class="ds-node is-available"><span class="ds-node__tier">1</span><b>Disparo Duplo</b><small>+1 projétil</small></button>
+              <button class="ds-node is-blocked" data-reason="Aprenda o nível anterior do caminho"><span class="ds-node__tier">2</span><b>Mãos Rápidas</b><small>+30% velocidade</small></button>
+              <button class="ds-node is-blocked" data-reason="Só um caminho pode chegar ao nível 3"><span class="ds-node__tier">3</span><b>Chuva de Flechas</b><small>+2 projéteis</small></button>
+            </div>
+          </div>
+        </div>
+        <div class="ds-card ds-card--frost" style="display:grid;gap:16px;align-content:start">
+          <div class="ds-field">
+            <span class="ds-label" style="display:flex;justify-content:space-between">XP do Nanuk <span id="xp-label" style="font-family:var(--font-num)">35/100</span></span>
+            <div class="ds-progress ds-progress--xp" id="xp" style="--v:.35"><div class="ds-progress__fill"></div></div>
+            <div><button class="ds-btn ds-btn--sm" id="xp-add">+ XP</button></div>
+          </div>
+          <div class="ds-field">
+            <span class="ds-label" style="display:flex;justify-content:space-between">Garantia de Lendário <span id="pity-label" style="font-family:var(--font-num)">5/8</span></span>
+            <div class="ds-pips" id="pips"></div>
+            <span class="ds-help">A cada chefe derrotado sem Lendário, acende um.</span>
+            <div><button class="ds-btn ds-btn--sm" id="pity-add">Derrotar chefe</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12 -->
+    <section class="pg-sec" id="feedback">
+      <div class="pg-sec__head"><span class="pg-sec__num">13</span><h2>Feedback</h2></div>
+      <p class="pg-sec__desc">Avisos curtos no topo com barra de tempo, números que saltam do ponto da ação e um modal de recompensa com raios de luz girando.</p>
+      <div class="ds-card ds-card--frost">
+        <div class="pg-row">
+          <button class="ds-btn ds-btn--sm" data-toast="info">Aviso</button>
+          <button class="ds-btn ds-btn--sm ds-btn--go" data-toast="success">Sucesso</button>
+          <button class="ds-btn ds-btn--sm ds-btn--danger" data-toast="error">Erro</button>
+          <button class="ds-btn ds-btn--sm ds-btn--gold" data-toast="loot">Drop lendário</button>
+          <button class="ds-btn ds-btn--sm ds-btn--primary" id="open-modal">Tela de vitória</button>
+          <button class="ds-btn ds-btn--sm" id="float-demo">Número de dano</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 13 -->
+    <section class="pg-sec" id="a11y">
+      <div class="pg-sec__head"><span class="pg-sec__num">14</span><h2>Acessibilidade</h2></div>
+      <p class="pg-sec__desc">Contraste calculado ao vivo a partir dos tokens (regra WCAG): 4,5 para texto comum, 3 para texto grande e elementos de interface. O resto: foco amarelo visível em tudo, alvo de 44 px, "Sem animação" respeitado automaticamente quando o sistema pede menos movimento.</p>
+      <div class="ds-card ds-card--frost" style="overflow-x:auto">
+        <table class="pg-contrast" id="contrast"><thead><tr><th>Uso</th><th>Amostra</th><th>Razão</th><th>Resultado</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- 14 -->
+    <section class="pg-sec" id="aprovar">
+      <div class="pg-sec__head"><span class="pg-sec__num">15</span><h2>O que você está aprovando</h2></div>
+      <div class="ds-card">
+        <ul class="pg-check">
+          <li><label><input type="checkbox"> Visual original (v0.1) com filtro quente leve ligado por padrão</label></li>
+          <li><label><input type="checkbox"> Selos de elemento (losango + nome) e retorno "EFICAZ" / "RESISTE"</label></li>
+          <li><label><input type="checkbox"> Fonte arredondada do sistema (sem baixar fonte)</label></li>
+          <li><label><input type="checkbox"> Regra "tinta para peças do jogo, vidro para leitura"</label></li>
+          <li><label><input type="checkbox"> Botões de gel com afundar e reflexo</label></li>
+          <li><label><input type="checkbox"> Seis raridades com efeito crescente (Lendário pulsa, Mítico arco-íris holográfico)</label></li>
+          <li><label><input type="checkbox"> Intensidade de efeitos padrão: "Completos" (com opção do jogador)</label></li>
+        </ul>
+        <p style="margin:16px 0 0;color:var(--ink-2)">Depois do OK: as telas do jogo passam a usar <code>tokens.css</code> + <code>ds.css</code>, e o <code>main.css</code> atual é aposentado aos poucos.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="pg-foot">Esquimó TD · Design System v0.1 · <a href="admin-esquimo.html">painel de esquimós</a> · <a href="../index.html">voltar ao jogo</a></footer>
+
+  <div class="ds-toast-root" id="toasts" aria-live="polite"></div>
+
+  <div class="ds-overlay" id="modal" hidden>
+    <div class="ds-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="ds-modal__burst" aria-hidden="true"></div>
+      <h3 class="ds-modal__title" id="modal-title">Vitória!</h3>
+      <p style="text-align:center;margin:0 0 16px;color:var(--ink-2);font-weight:700">Rodadas 8/8 · +130 XP · novo esquimó desbloqueado</p>
+      <div class="pg-row" style="justify-content:center;gap:22px 14px;padding-top:12px">
+        <article class="ds-item r-rare"><span class="ds-item__tag">Raro</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-sword"/></svg></span><span class="ds-item__name">Arco Rúnico</span></article>
+        <article class="ds-item ds-item--legendary r-legendary"><span class="ds-item__tag">Lendário</span><span class="ds-item__icon"><svg class="ds-ico"><use href="#i-gem"/></svg></span><span class="ds-item__name">Cajado Boreal</span></article>
+      </div>
+      <div class="ds-modal__actions">
+        <button class="ds-btn" data-close>Quartel</button>
+        <button class="ds-btn ds-btn--go" data-close>Continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="design-system.js"></script>
+</body>
+</html>
