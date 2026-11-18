@@ -30,7 +30,9 @@ node tools/sim-economia.mjs 1000 esquimo-td
 
 ## Publicação
 
-Importe o repositório na Vercel. O `vercel.json` configura o modo solo como site estático sem build. As contas, o conteúdo editado e o progresso solo ficam no navegador, por domínio. Use **Exportar progresso** para gerar um arquivo que a conta online com o mesmo nome possa importar uma vez.
+O `vercel.json` publica o modo solo como arquivos estáticos e encaminha `/api` e `/ws` à função do multiplayer. As contas, o conteúdo editado e o progresso solo ficam no navegador, por domínio. Use **Exportar progresso** para gerar um arquivo que a conta online com o mesmo nome possa importar uma vez.
+
+Na Vercel, o botão **Multiplayer** abre `?modo=coop`. A função usa `KV_REST_API_URL` e `KV_REST_API_TOKEN` (ou `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`) do banco vinculado ao projeto. O Redis guarda as contas e salas e distribui mensagens entre instâncias. `ETD_ORIGIN` pode definir a URL HTTPS pública quando ela difere do domínio de produção da Vercel. Sem credenciais de banco, o site apresenta o acesso local e o modo solo continua disponível.
 
 ## Servidor online
 

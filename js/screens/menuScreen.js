@@ -507,7 +507,8 @@ export function menuScreen(root, params = {}) {
         el('small', { text: `${s.wins} vitórias · ${s.roundsTotal} rodadas` })),
       preferencesButton(),
       !online && el('button', { class: 'btn btn-small', text: 'Exportar progresso', onclick: exportLocal }),
-      online && acc.role === 'admin' && el('button', { class: 'btn btn-small', text: 'Admin', onclick: () => go('admin') }),
+      (!online || acc.role === 'admin') && el('button', { class: 'btn btn-small', text: 'Painel Admin',
+        onclick: () => go(online ? 'admin' : 'adminLogin') }),
       el('button', { class: 'btn btn-small', text: 'Sair', onclick: async () => {
         try { await logout(); go('login'); } catch (error) { toast(error.message, 'error'); }
       } })),

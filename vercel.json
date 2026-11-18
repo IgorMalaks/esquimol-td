@@ -2,8 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "",
-  "buildCommand": "",
-  "outputDirectory": ".",
+  "buildCommand": "node tools/build-web.mjs",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/etd.js": { "maxDuration": 300 }
+  },
+  "rewrites": [
+    { "source": "/ws", "destination": "/api/etd?etdPath=ws" },
+    { "source": "/api/:route(.*)", "destination": "/api/etd?etdPath=:route" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

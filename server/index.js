@@ -17,6 +17,7 @@ import { beginMatch, finishMatch, secureRandom } from './matches.js';
 import { importLocal, updateProfile } from './profile.js';
 import { advanceTrades, affectedTrades, cancelTradesFor, changeTrade, reservedItem, tradeView } from './trade.js';
 import { roomHub } from './rooms.js';
+import { cloudRooms } from './cloudRooms.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const ASSET = /^\/(?:index\.html|(?:js|css|preview)\/(?:[\w-]+\/)*[\w.-]+\.(?:html|js|css)|assets\/[\w-]+\.jpg)$/;
@@ -27,6 +28,13 @@ const freshProgress = () => ({
 });
 const publicAccount = ({ username, role, progress, createdAt, localImported }) =>
   ({ username, role, progress, createdAt, localImported: Boolean(localImported) });
+function routePath(request) {
+  const url = new URL(request.url, 'http://localhost');
+  if (url.pathname !== '/api/etd') return url.pathname;
+  const route = url.searchParams.get('etdPath');
+  if (route === 'ws') return '/ws';
+  return /^[-a-z]+(?:\/[-a-z]+)*$/.test(route ?? '') ? `/api/${route}` : url.pathname;
+}
 const authorized = (data, session) => {
   const current = data.sessions[session.hash];
   if (!current || current.account !== session.id || current.expires <= Date.now()) {
@@ -54,9 +62,17 @@ async function serveAsset(request, response, path) {
   response.end(request.method === 'HEAD' ? undefined : contents);
 }
 
-export function createGameServer({ store, publicOrigin }) {
+export function createGameServer({ store, publicOrigin, cluster }) {
   const checkLogin = loginLimiter();
   const peers = new Map();
+  const deliver = (id, message) => { for (const connection of peers.get(id) ?? []) connection.send(message); };
+  const cloud = cluster && cloudRooms({ ...cluster, store, contentSnapshot, deliver, onTrade: settleTrades,
+    revoke: (hash) => disconnect(hash) });
+  const runWithStore = (work) => store.run ? store.run(work) : work();
+  const sendToPlayers = async (messages) => {
+    if (cloud) await cloud.sendMany(messages);
+    else for (const [id, message] of messages) deliver(id, message);
+  };
   const configuredURL = publicOrigin && new URL(publicOrigin);
   const secure = configuredURL?.protocol === 'https:';
   const expectedOrigin = (request) => {
@@ -66,21 +82,18 @@ export function createGameServer({ store, publicOrigin }) {
     return `http://${host}`;
   };
   const presence = (id) => {
+    if (cloud) return cloud.presence(id);
     const connections = peers.get(id);
     if (!connections?.size) return 'offline';
     return [...connections].some((connection) => connection.playing) ? 'em partida' : 'online';
   };
   const present = (id) => presence(id) !== 'offline';
-  const rooms = roomHub({ store, contentSnapshot, present, send: (id, message) => {
-    for (const socket of peers.get(id) ?? []) socket.send(message);
-  } });
+  const rooms = cloud ?? roomHub({ store, contentSnapshot, present, send: deliver });
   const broadcastFriends = () => {
     const roster = store.read();
-    for (const [id, connections] of peers) {
-      if (!Object.hasOwn(roster.accounts, id)) continue;
-      const payload = { type: 'friends', ...friendsView(roster, id, presence) };
-      for (const connection of connections) connection.send(payload);
-    }
+    return sendToPlayers([...(cloud?.players() ?? peers.keys())]
+      .filter((id) => Object.hasOwn(roster.accounts, id)).map((id) =>
+        [id, { type: 'friends', ...friendsView(roster, id, presence) }]));
   };
   const disconnect = (hash) => {
     for (const connections of peers.values()) {
@@ -90,11 +103,8 @@ export function createGameServer({ store, publicOrigin }) {
   const broadcastTrades = () => {
     const data = store.read();
     const content = data.content ?? createDefaultData();
-    for (const [id, connections] of peers) {
-      if (!Object.hasOwn(data.accounts, id)) continue;
-      const payload = tradeView(data, content, id);
-      for (const connection of connections) connection.send(payload);
-    }
+    return sendToPlayers([...(cloud?.players() ?? peers.keys())]
+      .filter((id) => Object.hasOwn(data.accounts, id)).map((id) => [id, tradeView(data, content, id)]));
   };
   let advancing = false;
   async function settleTrades() {
@@ -102,7 +112,7 @@ export function createGameServer({ store, publicOrigin }) {
     advancing = true;
     try {
       await store.update((data) => advanceTrades(data, data.content ?? createDefaultData(), present));
-      broadcastTrades();
+      await broadcastTrades();
     } catch (error) {
       console.error('Falha ao concluir trocas.', error.code ?? error.name);
     } finally {
@@ -111,7 +121,7 @@ export function createGameServer({ store, publicOrigin }) {
   }
 
   async function route(request, response) {
-    const path = new URL(request.url, 'http://localhost').pathname;
+    const path = routePath(request);
     const method = request.method;
     const origin = expectedOrigin(request);
     if (['POST', 'PUT', 'DELETE'].includes(method) && request.headers.origin !== origin) {
@@ -205,14 +215,18 @@ export function createGameServer({ store, publicOrigin }) {
         delete data.accounts[session.id];
         return removed;
       });
-      for (const hash of hashes) disconnect(hash);
-      broadcastFriends();
-      broadcastTrades();
+      for (const hash of hashes) {
+        disconnect(hash);
+        if (cloud) await cloud.revoke(hash);
+      }
+      await broadcastFriends();
+      await broadcastTrades();
       return sendJSON(response, 200, { ok: true }, { 'Set-Cookie': cookie('', secure) });
     }
     if (method === 'POST' && path === '/api/logout') {
       await store.update((data) => { delete data.sessions[session.hash]; });
       disconnect(session.hash);
+      if (cloud) await cloud.revoke(session.hash);
       return sendJSON(response, 200, { ok: true }, { 'Set-Cookie': cookie('', secure) });
     }
     if (path === '/api/friends') {
@@ -222,7 +236,7 @@ export function createGameServer({ store, publicOrigin }) {
           authorized(data, session);
           changeFriend(data, session.id, body);
         });
-        broadcastFriends();
+        await broadcastFriends();
       } else if (method !== 'GET') throw httpError(405, 'Método inválido.');
       return sendJSON(response, 200, store.read((data) => friendsView(data, session.id, presence)));
     }
@@ -235,7 +249,7 @@ export function createGameServer({ store, publicOrigin }) {
           advanceTrades(data, content, present);
           changeTrade(data, content, session.id, body, present);
         });
-        broadcastTrades();
+        await broadcastTrades();
       } else if (method !== 'GET') throw httpError(405, 'Método inválido.');
       return sendJSON(response, 200, store.read((data) => tradeView(data, data.content ?? createDefaultData(), session.id)));
     }
@@ -244,7 +258,7 @@ export function createGameServer({ store, publicOrigin }) {
       if (method !== 'POST') throw httpError(405, 'Método inválido.');
       const body = await jsonBody(request);
       if (!readSession(request, store) || !present(session.id)) throw httpError(409, 'Conecte-se à sala para continuar.');
-      return sendJSON(response, 200, await rooms.command(session.id, body));
+      return sendJSON(response, 200, await rooms.command(session.id, body, session.hash));
     }
     if (method === 'POST' && path === '/api/match/start') {
       const body = await jsonBody(request);
@@ -321,20 +335,22 @@ export function createGameServer({ store, publicOrigin }) {
   const server = createServer({ requestTimeout: 15_000, maxHeaderSize: 8192 }, (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    route(request, response).catch((error) => {
+    Promise.resolve(runWithStore(() => route(request, response))).catch((error) => {
       if (response.headersSent) { response.destroy(); return; }
       const status = error.status ?? 500;
       if (status === 500) console.error('Falha interna do servidor.', error.code ?? error.name);
       sendJSON(response, status, { error: status < 500 ? error.message : 'Falha interna do servidor.' });
     });
   });
-  const tradeTimer = setInterval(settleTrades, 500);
-  tradeTimer.unref();
-  server.once('close', () => clearInterval(tradeTimer));
-  server.on('upgrade', (request, socket, head) => {
+  if (!cloud) {
+    const tradeTimer = setInterval(settleTrades, 500);
+    tradeTimer.unref();
+    server.once('close', () => clearInterval(tradeTimer));
+  }
+  function openSocket(request, socket, head) {
     let session;
     try {
-      if (request.url === '/ws' && request.headers.origin === expectedOrigin(request)) {
+      if (routePath(request) === '/ws' && request.headers.origin === expectedOrigin(request)) {
         session = readSession(request, store);
       }
     } catch { /* requisição sem origem válida */ }
@@ -344,9 +360,10 @@ export function createGameServer({ store, publicOrigin }) {
     }
     const connections = peers.get(session.id) ?? new Set();
     if (connections.size >= 4) { socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n'); return; }
+    const peerId = cloud && randomUUID();
     const connection = acceptSocket(request, socket, head, {
       onMessage(payload) {
-        const valid = store.read((data) => data.sessions[session.hash]?.account === session.id &&
+        const valid = cloud || store.read((data) => data.sessions[session.hash]?.account === session.id &&
           data.sessions[session.hash].expires > Date.now());
         if (!valid) { connection.close(1008); return; }
         let message;
@@ -356,15 +373,20 @@ export function createGameServer({ store, publicOrigin }) {
             message.playing !== connection.playing && Date.now() - (connection.lastPresence ?? 0) >= 1000) {
           connection.playing = message.playing;
           connection.lastPresence = Date.now();
-          broadcastFriends();
+          if (cloud) void cloud.playing(session.id, peerId, message.playing).then(() => runWithStore(broadcastFriends)).catch(() => {});
+          else void broadcastFriends();
         }
       },
       onClose() {
         connections.delete(connection);
         if (!connections.size) peers.delete(session.id);
-        broadcastFriends();
-        void settleTrades();
-        rooms.disconnected(session.id);
+        if (cloud) void cloud.close(session.id, peerId).then(() =>
+          runWithStore(async () => { await broadcastFriends(); await settleTrades(); })).catch(() => {});
+        else {
+          void broadcastFriends();
+          void settleTrades();
+          rooms.disconnected(session.id);
+        }
       },
     });
     if (!connection) return;
@@ -372,9 +394,22 @@ export function createGameServer({ store, publicOrigin }) {
     connection.playing = false;
     connections.add(connection);
     peers.set(session.id, connections);
-    broadcastFriends();
+    if (cloud) {
+      void cloud.connect(session.id, peerId, session.hash).then(() => runWithStore(async () => {
+        await broadcastFriends();
+        connection.send(store.read((data) => tradeView(data, data.content ?? createDefaultData(), session.id)));
+      })).catch(() => connection.close(1011));
+      return;
+    }
+    void broadcastFriends();
     connection.send(store.read((data) => tradeView(data, data.content ?? createDefaultData(), session.id)));
     rooms.connection(session.id);
+  }
+  server.on('upgrade', (request, socket, head) => {
+    socket.on('error', () => socket.destroy());
+    void Promise.resolve(runWithStore(() => openSocket(request, socket, head))).catch(() => {
+      socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    });
   });
   return server;
 }

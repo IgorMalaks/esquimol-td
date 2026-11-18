@@ -19,6 +19,14 @@ registerScreen('multiplayer', multiplayerScreen);
 
 applyPreferences();
 try {
+  const wantsCoop = new URLSearchParams(location.search).get('modo') === 'coop';
+  if (wantsCoop && !isOnline()) {
+    try {
+      const response = await fetch('/api/health', { signal: AbortSignal.timeout(7000) });
+      const health = response.ok && await response.json();
+      if (health?.service === 'esquimo-td' && health.status === 'ok') document.documentElement.dataset.backend = 'cloud';
+    } catch { /* mantém o modo solo se o multiplayer estiver indisponível */ }
+  }
   if (isOnline()) {
     const [data, account] = await Promise.all([requestAPI('/content'), requestAPI('/me', { anonymous: true })]);
     useServerContent(data.content);
@@ -40,7 +48,6 @@ try {
       }
     });
   } else getData();
-  const wantsCoop = new URLSearchParams(location.search).get('modo') === 'coop';
   if (wantsCoop && !isOnline()) go('multiplayer');
   else go(currentAccount() ? 'menu' : 'login', wantsCoop ? { tab: 'online' } : {});
 } catch (error) {

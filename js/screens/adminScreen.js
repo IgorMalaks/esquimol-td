@@ -1,7 +1,7 @@
 // Painel Admin: CRUD de Esquimós (com árvore), Inimigos (camadas), Fases/Rodadas, Itens e Dados.
 import { el, toast, clone, getPath, setPath, slugify, uid, confirmDialog } from '../core/utils.js';
 import { go } from '../core/router.js';
-import { isAdminSession, adminLogout, adminChangePassword } from '../core/auth.js';
+import { isAdminSession, adminLogout, adminChangePassword, currentAccount } from '../core/auth.js';
 import { storage } from '../core/storage.js';
 import { getData, saveData, resetData, prepareData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES, DEFAULT_FACE } from '../data/defaults.js';
@@ -704,9 +704,9 @@ function render() {
         el('strong', {}, 'Esquimó ', el('span', { text: 'TD' })),
         el('span', { class: 'admin-brand-section', text: 'Painel Admin' })),
       el('div', { class: 'admin-top-actions' },
-        el('button', { class: 'btn', text: 'Voltar ao jogo', onclick: () => go(isOnline() ? 'menu' : 'login') }),
+        el('button', { class: 'btn', text: 'Voltar ao jogo', onclick: () => go(currentAccount() ? 'menu' : 'login') }),
         el('button', { class: 'btn admin-discard', text: 'Sair do admin', onclick: async () => {
-          try { await adminLogout(); go('login'); } catch (error) { toast(error.message, 'error'); }
+          try { await adminLogout(); go(currentAccount() ? 'menu' : 'login'); } catch (error) { toast(error.message, 'error'); }
         } }))),
     el('div', { class: 'admin-workspace' },
       el('nav', { class: 'admin-nav', 'aria-label': 'Seções do painel' },

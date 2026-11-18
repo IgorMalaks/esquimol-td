@@ -1,7 +1,7 @@
 /docs/
 /tests/
-/tools/
-/server/
+/tools/sim-economia.mjs
+/dist/
 /var/
 /README.md
 /LICENSE

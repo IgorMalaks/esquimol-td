@@ -6,7 +6,7 @@ let socket = null;
 let playing = false;
 let contentHash = null;
 const listeners = new Set();
-export const isOnline = () => globalThis.document?.documentElement.dataset.backend === 'node';
+export const isOnline = () => ['node', 'cloud'].includes(globalThis.document?.documentElement.dataset.backend);
 export const onlineAccount = () => structuredClone(account);
 export const currentContentHash = () => contentHash;
 export function setContentHash(hash) { contentHash = hash; }

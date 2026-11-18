@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promise
 import { basename, dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const fresh = () => ({ version: 1, accounts: {}, sessions: {}, content: null, history: [] });
+export const initialStore = () => ({ version: 1, accounts: {}, sessions: {}, content: null, history: [] });
 const record = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
 export function validateStore(data) {
@@ -46,7 +46,7 @@ export async function openStore(path) {
     state = validateStore(JSON.parse(await readFile(filename, 'utf8')));
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    state = fresh();
+    state = initialStore();
     await writeAtomic(filename, state);
   }
   let queue = Promise.resolve();

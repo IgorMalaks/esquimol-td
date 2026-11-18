@@ -5,11 +5,17 @@ import { byId } from '../js/data/gameData.js';
 import { beginMatch, finishMatch } from './matches.js';
 import { ensureProgress } from '../js/core/progression.js';
 
-export function roomHub({ store, contentSnapshot, send, present }) {
-  const rooms = new Map();
-  const membership = new Map();
-  const invitations = new Map();
+export function roomHub({ store, contentSnapshot, send, present, saved }) {
+  const rooms = new Map((saved?.rooms ?? []).map(([id, room]) => [id, { ...room, members: new Map(room.members) }]));
+  const membership = new Map(saved?.membership);
+  const invitations = new Map((saved?.invitations ?? []).map(([id, rooms]) => [id, new Set(rooms)]));
   const presenceTimers = new Map();
+
+  const snapshot = () => ({
+    rooms: [...rooms].map(([id, room]) => [id, { ...room, members: [...room.members] }]),
+    membership: [...membership],
+    invitations: [...invitations].filter(([, rooms]) => rooms.size > 0).map(([id, rooms]) => [id, [...rooms]]),
+  });
 
   function describe(state, room, player) {
     const account = state.accounts[player];
@@ -266,5 +272,10 @@ export function roomHub({ store, contentSnapshot, send, present }) {
     }
   }
 
-  return { command, view, relay, connection, disconnected };
+  function rememberReport(player, report) {
+    const room = rooms.get(membership.get(player));
+    if (room?.owner === player && room.status === 'playing' && Number.isInteger(report?.round)) room.report = report;
+  }
+
+  return { command, view, relay, connection, disconnected, snapshot, exit, rememberReport };
 }

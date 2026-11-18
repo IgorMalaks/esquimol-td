@@ -9,6 +9,6 @@
     "start": "python3 -m http.server 5173 --bind 127.0.0.1",
     "start:server": "node server/index.js",
     "test": "node --test tests/*.test.js",
-    "test:server": "node --test tests/server.test.mjs"
+    "test:server": "node --test tests/*.test.mjs"
   }
 }

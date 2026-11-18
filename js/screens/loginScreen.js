@@ -67,6 +67,7 @@ export function loginScreen(root, { tab } = {}) {
     hero(), form,
     el('div', { class: 'auth-game-actions' },
       !isOnline() && el('a', { class: 'btn btn-small', href: '?modo=coop', text: 'Multiplayer' }),
+      document.documentElement.dataset.backend === 'cloud' && el('a', { class: 'btn btn-small', href: './', text: 'Jogar solo' }),
       preferencesButton()),
     el('a', { href: '#', class: 'admin-link', text: 'Painel Admin', onclick: (e) => { e.preventDefault(); go('adminLogin'); } })));
   user.focus();
