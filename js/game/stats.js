@@ -1,4 +1,7 @@
 // Regras puras de atributos, upgrades e árvore de habilidades (sem DOM, testáveis).
+import { CLASSES } from '../data/defaults.js';
+
+const numericEffect = (label, suffix = '') => ({ label, fmt: (v) => `+${v}${suffix} ${label.toLowerCase()}` });
 export const EFFECT_KEYS = {
   damage: { label: 'Dano', fmt: (v) => `+${v} dano` },
   pierce: { label: 'Perfuração', fmt: (v) => `+${v} perfuração` },
@@ -8,6 +11,23 @@ export const EFFECT_KEYS = {
   slowPct: { label: 'Lentidão %', fmt: (v) => `+${v}% lentidão` },
   multishot: { label: 'Projéteis extras', fmt: (v) => `+${v} projétil(eis)` },
   hitsAir: { label: 'Antiaéreo', fmt: () => 'Atinge aéreos' },
+  summonCount: numericEffect('Aliados por invocação'),
+  maxAllies: numericEffect('Limite de aliados'),
+  allyHp: numericEffect('Vida dos aliados'),
+  allyDamage: numericEffect('Dano dos aliados'),
+  allySpeedPct: numericEffect('Velocidade dos aliados', '%'),
+  allyLifetime: numericEffect('Duração dos aliados', ' s'),
+  allyKind: { label: 'Aliado (0 pinguim, 1 foca, 2 urso, 3 lobo)', fmt: (v) => ['Pinguins', 'Focas', 'Ursos', 'Lobos'][v] ?? '' },
+  allySlowPct: numericEffect('Lentidão dos aliados', '%'),
+  allyExplode: numericEffect('Raio de explosão dos aliados'),
+  buffDamage: numericEffect('Dano na aura'),
+  buffSpeedPct: numericEffect('Velocidade na aura', '%'),
+  buffRangePct: numericEffect('Alcance na aura', '%'),
+  buffPierce: numericEffect('Perfuração na aura'),
+  buffAntiAereo: { label: 'Aura antiaérea', fmt: () => 'Concede antiaéreo' },
+  auraRangePct: numericEffect('Raio da aura', '%'),
+  auraGold: numericEffect('Ouro por rodada'),
+  auraCooldown: { label: 'Recarga ativa na aura', fmt: (v) => `−${v}% de recarga` },
 };
 
 export const BASE_STATS = {
@@ -55,9 +75,7 @@ export function itemStatsText(item) {
 }
 
 export function computeStats(def, { items = [], nodes = [], upgrades = null } = {}) {
-  const s = { ...BASE_STATS, ...def.stats, hitsAir: Number(Boolean(
-    def.hitsAir || def.classId === 'arpoador' || def.classId === 'mago'
-  )) };
+  const s = { ...BASE_STATS, ...def.stats, hitsAir: Number(Boolean(def.hitsAir || CLASSES[def.classId]?.hitsAir)) };
   for (const it of items) for (const [k, v] of Object.entries(it.stats || {})) applyEffect(s, k, v);
   for (const n of nodes) applyEffect(s, n.effect?.key, n.effect?.value);
   if (upgrades) for (const [k, lvl] of Object.entries(upgrades)) UPGRADE_TRACKS[k]?.apply(s, lvl);

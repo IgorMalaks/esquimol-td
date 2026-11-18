@@ -8,6 +8,8 @@ import { rollItem, rbe } from '../core/progression.js';
 import { economy } from './economy.js';
 import { canHitEnemy, hasTrait } from './enemies.js';
 import { endlessEnemies, endlessGold, endlessRound } from './endless.js';
+import { ALLY_DEFAULTS, applyAuras, summonerStats, supportStats } from './roles.js';
+import { SpatialGrid } from './spatialGrid.js';
 import { seededRandom } from '../core/utils.js';
 
 export const WORLD = { W: 1000, H: 600 };
@@ -22,6 +24,12 @@ const PATH_W = 46;
 const ITEM_LIFETIME = 8;
 const DROP_HIT_R = 30;
 const SELL_RATIO = 0.7;
+const ALLY_FACES = {
+  pinguim: { shape: 'oval', skin: '#536374', eyes: 'pontos', mouth: 'sorriso', headwear: 'nenhum', accessory: 'nenhum' },
+  lobo: { shape: 'gota', skin: '#858b9d', eyes: 'bravos', mouth: 'dentes', headwear: 'orelhas', headwearColor: '#596176', accessory: 'nenhum' },
+  urso: { shape: 'redondo', skin: '#f8f2e4', eyes: 'bravos', mouth: 'reta', headwear: 'orelhas', headwearColor: '#dfd9ce', accessory: 'nenhum' },
+  foca: { shape: 'oval', skin: '#8db2c3', eyes: 'felizes', mouth: 'sorriso', headwear: 'nenhum', accessory: 'bigode' },
+};
 
 export const TARGET_MODES = ['primeiro', 'ultimo', 'forte', 'perto'];
 export const TARGET_LABEL = { primeiro: 'Primeiro', ultimo: 'Último', forte: 'Mais forte', perto: 'Mais perto' };
@@ -34,7 +42,7 @@ export class Game {
    * @param {{data, phase, map, roster: Array<{def, nodes, items}>, callbacks}} opts
    * callbacks: onHud(state), onSelect(tower|null), onToast(msg,type), onEnd(result)
    */
-  constructor(canvas, { data, phase, map, roster, callbacks }) {
+  constructor(canvas, { data, phase, map, roster, abilities = [], callbacks }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.data = data;
@@ -51,6 +59,11 @@ export class Game {
     this.rbeMemo = Object.create(null);
     this.canHitAir = roster.some((entry) => computeStats(entry.def, entry).hitsAir);
     this.bossDrops = [];
+    this.preparation = null;
+    this.abilities = abilities.map((ability) => ability && { ...ability, remaining: ability.cooldown / 2 });
+    this.abilityTarget = null;
+    this.abilityBursts = [];
+    this.goldBoost = null;
 
     this.gold = Number(phase.startGold);
     this.lives = Number(phase.lives);
@@ -64,6 +77,8 @@ export class Game {
 
     this.towers = [];
     this.enemies = [];
+    this.enemyGrid = new SpatialGrid();
+    this.allies = [];
     this.projectiles = [];
     this.drops = [];
     this.effects = [];
@@ -76,6 +91,7 @@ export class Game {
     this.ghost = null;
     this.selected = null;
     this.time = 0;
+    this.simTime = 0;
 
     const rnd = seededRandom(`snow${map.id}`);
     this.snow = Array.from({ length: 50 }, () => ({ x: rnd() * WORLD.W, y: rnd() * WORLD.H, s: 1 + rnd() * 2.2, v: 15 + rnd() * 30 }));
@@ -116,6 +132,14 @@ export class Game {
   };
 
   update(dt) {
+    this.simTime += dt;
+    if (this.preparation !== null) {
+      this.preparation = Math.max(0, this.preparation - dt);
+      if (this.preparation === 0) {
+        this.preparation = null;
+        this.startRound();
+      }
+    }
     if (this.roundActive) {
       this.roundTime += dt;
       while (this.spawnQueue.length && this.spawnQueue[0].t <= this.roundTime) {
@@ -123,7 +147,13 @@ export class Game {
       }
     }
     for (const e of this.enemies) this._updateEnemy(e, dt);
+    this.enemyGrid.clear();
+    for (const e of this.enemies) if (e.alive) this.enemyGrid.add(e);
+    if (this.over) return;
+    this._updateAbilities(dt);
     for (const t of this.towers) this._updateTower(t, dt);
+    for (const ally of this.allies) this._updateAlly(ally, dt);
+    this.allies = this.allies.filter((ally) => !ally.dead);
     for (const p of this.projectiles) this._updateProjectile(p, dt);
     for (const d of this.drops) { d.t += dt; if (d.t >= d.life) d.dead = true; }
     for (const fx of this.effects) fx.t += dt;
@@ -139,9 +169,13 @@ export class Game {
 
   // ---------- Rodadas ----------
   startRound() {
-    if (this.roundActive || this.over) return;
+    if (this.roundActive || this.over || this.preparation !== null) return;
     const r = this.nextRound();
     if (!r?.groups.length) return;
+    if (this.phase.raid && !this.raidStarted) {
+      if (this.cb.onRaidStart?.() === false) return;
+      this.raidStarted = true;
+    }
     if (this.phase.endless) {
       const enemies = endlessEnemies(this.data, this.round + 1);
       this.roundData = { ...this.data, enemies };
@@ -170,9 +204,15 @@ export class Game {
   _endRound() {
     this.roundActive = false;
     this.round++;
-    const bonus = this.phase.endless ? endlessGold(this.round) : 100 + this.round;
+    const bonus = (this.phase.endless ? endlessGold(this.round) : 100 + this.round) +
+      this.towers.reduce((sum, tower) => sum + (tower.stats.roundGold ?? 0), 0);
     this.gold += bonus;
     if (!this.phase.endless && this.round >= this.phase.rounds.length) { this.end(true); return; }
+    if (this.phase.raid && this.round === this.phase.raid.farmRounds.length) {
+      this.preparation = this.phase.raid.prepTime;
+      this.cb.onToast?.('O chefe está chegando. Prepare as defesas!', 'info');
+      return;
+    }
     this.cb.onToast?.(`Rodada ${this.round} concluída! +${bonus} ouro`, 'success');
     if (this.autoStart) this.startRound();
   }
@@ -182,13 +222,14 @@ export class Game {
     this.over = true;
     this.roundActive = false;
     if (victory) {
-      for (const d of this.drops) if (d.type === 'chest') this.loot.push(...this._openChest());
+      for (const d of this.drops) if (d.type === 'chest') this.loot.push(...this._openChest(d.source));
       this.drops = this.drops.filter((d) => d.type !== 'chest');
     }
     this.cb.onEnd?.({
       victory, phaseId: this.phase.id, roundsCompleted: this.round,
       items: [...this.loot], usedEskimos: [...this.used],
-      endless: this.phase.endless, duration: Math.floor(this.time), bossDrops: this.bossDrops,
+      endless: this.phase.endless, duration: Math.floor(this.simTime), bossDrops: this.bossDrops,
+      raid: this.phase.raid && this.raidStarted ? this.phase.raid.id : null,
     });
   }
 
@@ -200,18 +241,23 @@ export class Game {
       id: ++this.seq, def, path, dist, x: p.x, y: p.y, r: Number(def.size) || 15,
       hp: Math.max(1, Number(def.hp) || 1), alive: true, slowPct: 0, slowTimer: 0, phase: Math.random() * 6,
     };
+    if (this.phase.raid && def.id === this.phase.raid.bossId && this.round >= this.phase.raid.farmRounds.length) {
+      e.raidBoss = { timer: this.phase.raid.bossAbility.interval, stage: 0, speed: 1 };
+    }
     this.enemies.push(e);
+    this.enemyGrid.add(e);
     return e;
   }
 
   _updateEnemy(e, dt) {
     if (!e.alive) return;
     if (e.slowTimer > 0) { e.slowTimer -= dt; if (e.slowTimer <= 0) e.slowPct = 0; }
-    e.dist += Number(e.def.speed) * (1 - e.slowPct) * dt;
+    if (e.raidBoss) this._updateRaidBoss(e, dt);
+    e.dist += Number(e.def.speed) * (e.raidBoss?.speed ?? 1) * (1 - e.slowPct) * dt;
     if (e.dist >= e.path.length) {
       e.alive = false;
       this.lives -= rbe(e.def.id, this.roundData, this.rbeMemo);
-      if (this.lives <= 0) { this.lives = 0; this.end(false); }
+      if (this.lives <= 0 || e.raidBoss) { this.lives = Math.max(0, this.lives); this.end(false); }
       return;
     }
     const p = e.path.pointAt(e.dist);
@@ -226,18 +272,27 @@ export class Game {
       e.slowTimer = Math.max(e.slowTimer, p.slowDur);
     }
     e.hp -= dmg;
+    if (e.raidBoss && e.hp > 0) this._triggerRaidStages(e);
     if (e.hp <= 0) this._popEnemy(e, -e.hp, p);
   }
 
   // Camadas estilo Bloons: ao morrer, vira N inimigos da camada anterior; dano excedente passa adiante.
   _popEnemy(e, overflow, p) {
     e.alive = false;
-    this.gold += Number(e.def.reward) || 0;
+    const raid = this.phase.raid;
+    const inFarm = raid && this.round < raid.farmRounds.length;
+    const boost = this.goldBoost?.until > this.simTime ? this.goldBoost.multiplier : 1;
+    this.gold += (Number(e.def.reward) || 0) * (inFarm ? raid.farmGoldMultiplier : 1) * boost;
     if (p?.tower) p.tower.pops++;
     this.effects.push({ type: 'pop', x: e.x, y: e.y, r: e.r, color: e.def.face.skin, t: 0, dur: 0.3 });
-    if (this.phase.endless && hasTrait(e.def, 'chefe')) {
-      const reward = rollItem(this.data);
-      const drops = reward ? [reward.id] : [];
+    if (e.raidBoss || (this.phase.endless && hasTrait(e.def, 'chefe'))) {
+      const count = e.raidBoss ? raid.bossLoot.rolls : 1;
+      const source = e.raidBoss ? raid.bossLoot.source : 'normal';
+      const drops = [];
+      for (let i = 0; i < count; i++) {
+        const reward = rollItem(this.data, Math.random, source);
+        if (reward) drops.push(reward.id);
+      }
       this.loot.push(...drops);
       this.bossDrops.push(drops);
     } else {
@@ -252,7 +307,7 @@ export class Game {
       const distance = childPath === e.path ? e.dist : e.dist * childPath.length / e.path.length;
       const c = this.spawnEnemy(child, Math.max(0, distance - i * 12));
       c.slowPct = e.slowPct; c.slowTimer = e.slowTimer;
-      p?.hit.add(c.id);
+      p?.hit?.add(c.id);
       children.push(c);
     }
     if (overflow > 0 && canHitEnemy(child, p?.hitsAir)) this.hitEnemy(children[0], overflow, p && { hitsAir: p.hitsAir });
@@ -262,29 +317,30 @@ export class Game {
   _maybeDrop(e) {
     const settings = economy(this.data);
     if (Math.random() >= (Number(e.def.dropChance) || 0) * settings.dropRateMultiplier) return;
-    const item = rollItem(this.data);
+    const source = this.phase.raid && this.round < this.phase.raid.farmRounds.length ? 'raidFarm' : 'normal';
+    const item = rollItem(this.data, Math.random, source);
     if (!item) return;
     const chest = Math.random() < settings.chestChance;
     const ang = Math.random() * Math.PI * 2;
     const off = PATH_W * 0.7;
     this.drops.push({
-      id: ++this.seq, type: chest ? 'chest' : 'item', itemId: item.id,
+      id: ++this.seq, type: chest ? 'chest' : 'item', itemId: item.id, source,
       x: Math.min(WORLD.W - 20, Math.max(20, e.x + Math.cos(ang) * off)),
       y: Math.min(WORLD.H - 20, Math.max(20, e.y + Math.sin(ang) * off)),
       t: 0, life: chest ? Infinity : ITEM_LIFETIME,
     });
   }
 
-  _openChest() {
+  _openChest(source) {
     const out = [];
     const n = 1 + (Math.random() < 0.3 ? 1 : 0);
-    for (let i = 0; i < n; i++) { const it = rollItem(this.data); if (it) out.push(it.id); }
+    for (let i = 0; i < n; i++) { const it = rollItem(this.data, Math.random, source); if (it) out.push(it.id); }
     return out;
   }
 
   _collectDrop(d) {
     d.dead = true;
-    const ids = d.type === 'chest' ? this._openChest() : [d.itemId];
+    const ids = d.type === 'chest' ? this._openChest(d.source) : [d.itemId];
     this.loot.push(...ids);
     const names = ids.map((id) => this.data.items.find((i) => i.id === id)?.name).filter(Boolean).join(', ');
     this.cb.onToast?.(d.type === 'chest' ? `Baú aberto: ${names}` : `Você pegou: ${names}`, 'loot');
@@ -297,11 +353,21 @@ export class Game {
   }
 
   towerStats(t) {
+    const nodes = t.entry.nodes.filter((n) => t.active.has(n.id));
+    const role = CLASSES[t.def.classId]?.role;
+    if (role === 'suporte') return supportStats(t.def, nodes, t.upgrades);
+    t.summon = role === 'invocador' ? summonerStats(t.def, nodes, t.upgrades) : null;
     return computeStats(t.def, {
       items: t.entry.items,
-      nodes: t.entry.nodes.filter((n) => t.active.has(n.id)),
+      nodes,
       upgrades: t.upgrades,
     });
+  }
+
+  refreshTowerStats() {
+    for (const tower of this.towers) tower.stats = this.towerStats(tower);
+    const supports = this.towers.filter((tower) => tower.stats.buffs);
+    for (const tower of this.towers) if (!tower.stats.buffs) applyAuras(tower, supports);
   }
 
   canPlace(x, y) {
@@ -320,8 +386,8 @@ export class Game {
       uid: ++this.seq, def: entry.def, entry, x, y, cooldown: 0, angle: -Math.PI / 2,
       targetMode: 'primeiro', upgrades: { dmg: 0, spd: 0, rng: 0 }, active: new Set(), invested: cost, pops: 0,
     };
-    t.stats = this.towerStats(t);
     this.towers.push(t);
+    this.refreshTowerStats();
     this.gold -= cost;
     this.used.add(entry.def.id);
     this.effects.push({ type: 'ring', x, y, r: 28, color: '#ffffff', t: 0, dur: 0.35 });
@@ -336,7 +402,7 @@ export class Game {
     this.gold -= cost;
     t.invested += cost;
     t.upgrades[track]++;
-    t.stats = this.towerStats(t);
+    this.refreshTowerStats();
     return true;
   }
 
@@ -348,13 +414,14 @@ export class Game {
     this.gold -= cost;
     t.invested += cost;
     t.active.add(nodeId);
-    t.stats = this.towerStats(t);
+    this.refreshTowerStats();
     return true;
   }
 
   sell(t) {
     this.gold += Math.floor(t.invested * SELL_RATIO);
     this.towers = this.towers.filter((x) => x !== t);
+    this.refreshTowerStats();
     this.select(null);
   }
 
@@ -370,7 +437,7 @@ export class Game {
     const r = t.stats.range;
     let best = null;
     let bestScore = -Infinity;
-    for (const e of this.enemies) {
+    for (const e of this.enemyGrid.near(t.x, t.y, r)) {
       if (!e.alive || !canHitEnemy(e.def, t.stats.hitsAir) || dist2(t.x, t.y, e.x, e.y) > (r + e.r) ** 2) continue;
       const progress = e.dist / e.path.length;
       let score;
@@ -380,14 +447,20 @@ export class Game {
         case 'perto': score = -dist2(t.x, t.y, e.x, e.y); break;
         default: score = progress;
       }
-      if (score > bestScore) { bestScore = score; best = e; }
+      if (!best || score > bestScore || (score === bestScore && e.id < best.id)) { bestScore = score; best = e; }
     }
     return best;
   }
 
   _updateTower(t, dt) {
+    if ((t.stunnedUntil ?? 0) > this.simTime) return;
+    if (t.stats.buffs) return;
     t.cooldown -= dt;
     if (t.cooldown > 0) return;
+    if (t.summon) {
+      if (this.roundActive && this.enemies.some((enemy) => enemy.alive)) this._summon(t);
+      return;
+    }
     const target = this._findTarget(t);
     if (!target) return;
     t.cooldown = 1 / t.stats.fireRate;
@@ -415,7 +488,8 @@ export class Game {
     if (p.dead) return;
     p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
     if (p.life <= 0 || p.x < -30 || p.y < -30 || p.x > WORLD.W + 30 || p.y > WORLD.H + 30) { p.dead = true; return; }
-    for (const e of this.enemies) {
+    const nearby = [...this.enemyGrid.near(p.x, p.y, p.r)].sort((a, b) => a.id - b.id);
+    for (const e of nearby) {
       if (!e.alive || p.hit.has(e.id) || !canHitEnemy(e.def, p.hitsAir)) continue;
       if (dist2(p.x, p.y, e.x, e.y) > (e.r + p.r) ** 2) continue;
       if (p.splash > 0) { this._explode(p, e.x, e.y); p.dead = true; return; }
@@ -426,9 +500,75 @@ export class Game {
   }
 
   _explode(p, x, y) {
-    const targets = this.enemies.filter((e) => e.alive && dist2(x, y, e.x, e.y) <= (p.splash + e.r) ** 2);
+    const targets = [...this.enemyGrid.near(x, y, p.splash)].filter((e) =>
+      e.alive && canHitEnemy(e.def, p.hitsAir) && dist2(x, y, e.x, e.y) <= (p.splash + e.r) ** 2);
     for (const e of targets) { p.hit.add(e.id); this.hitEnemy(e, p.damage, p); }
     this.effects.push({ type: 'ring', x, y, r: p.splash, color: p.kind === 'gelo' ? '#7efcff' : '#ffffff', t: 0, dur: 0.3 });
+  }
+
+  _summon(tower) {
+    const stats = tower.summon;
+    const living = this.allies.filter((ally) => ally.tower === tower && !ally.dead).length;
+    const count = Math.max(0, Math.min(stats.summonCount, stats.maxAllies - living));
+    if (!count) return;
+    tower.cooldown = Math.max(0.2, stats.summonInterval);
+    for (let i = 0; i < count; i++) this._spawnAlly(tower, stats, i);
+  }
+
+  _spawnAlly(tower, stats, index) {
+    const dist = Math.max(0, this.path.length - 28 - index * 16);
+    this.allies.push({
+      ...this.path.pointAt(dist), dist, tower, stats: { ...stats },
+      hp: stats.allyHp, life: stats.allyLifetime, r: 12, contacts: new Map(),
+    });
+  }
+
+  _updateAlly(ally, dt) {
+    ally.life -= dt;
+    ally.dist -= ally.stats.allySpeed * dt;
+    Object.assign(ally, this.path.pointAt(Math.max(0, ally.dist)));
+    if (ally.life <= 0 || ally.dist <= 0) { this._expireAlly(ally); return; }
+    for (const [id, time] of ally.contacts) if (time <= this.simTime) ally.contacts.delete(id);
+    for (const enemy of this.enemyGrid.near(ally.x, ally.y, ally.r)) {
+      if (!enemy.alive || !canHitEnemy(enemy.def, false) || ally.contacts.has(enemy.id) ||
+          dist2(ally.x, ally.y, enemy.x, enemy.y) > (ally.r + enemy.r) ** 2) continue;
+      ally.contacts.set(enemy.id, this.simTime + 0.25);
+      this.hitEnemy(enemy, ally.stats.allyDamage, {
+        tower: ally.tower, hitsAir: false, slowPct: ally.stats.allySlowPct, slowDur: 1,
+      });
+      if (--ally.hp <= 0) { this._expireAlly(ally); return; }
+    }
+  }
+
+  _expireAlly(ally) {
+    ally.dead = true;
+    if (!ally.stats.allyExplode) return;
+    this._explode({ tower: ally.tower, splash: ally.stats.allyExplode, hitsAir: false,
+      damage: ally.stats.allyDamage, hit: new Set() }, ally.x, ally.y);
+  }
+
+  _updateRaidBoss(enemy, dt) {
+    const ability = this.phase.raid.bossAbility;
+    enemy.raidBoss.timer -= dt;
+    if (enemy.raidBoss.timer > 0) return;
+    enemy.raidBoss.timer += ability.interval;
+    for (const tower of this.towers) {
+      if (dist2(tower.x, tower.y, enemy.x, enemy.y) <= ability.radius ** 2) {
+        tower.stunnedUntil = this.simTime + ability.duration;
+      }
+    }
+    this.effects.push({ type: 'ring', x: enemy.x, y: enemy.y, r: ability.radius, color: '#49a9eb', t: 0, dur: 0.7 });
+  }
+
+  _triggerRaidStages(enemy) {
+    const stages = this.phase.raid.bossPhases;
+    while (stages[enemy.raidBoss.stage] && enemy.hp <= enemy.def.hp * stages[enemy.raidBoss.stage].hp) {
+      const stage = stages[enemy.raidBoss.stage++];
+      enemy.raidBoss.speed *= stage.speedMultiplier;
+      const escort = this.enemyDefs.get(stage.escortId);
+      if (!escort || escort === enemy.def) continue;
+      for (let i = 0; i < stage.escortCount; i++) this.spawnEnemy(escort, Math.max(0, enemy.dist - (i + 1) * 16));
+    }
   }
 
   // ---------- Seleção / input ----------
@@ -438,6 +578,7 @@ export class Game {
   }
 
   beginPlacing(id, dragging = false) {
+    this.abilityTarget = null;
     this.placing = id;
     this.dragging = dragging;
     this.select(null);
@@ -457,9 +598,9 @@ export class Game {
   }
 
   updateGhost(cx, cy) {
-    if (!this.placing) { this.ghost = null; return; }
+    if (!this.placing && this.abilityTarget === null) { this.ghost = null; return; }
     const w = this.clientToWorld(cx, cy);
-    this.ghost = w.inside ? { x: w.x, y: w.y, valid: this.canPlace(w.x, w.y) } : null;
+    this.ghost = w.inside ? { x: w.x, y: w.y, valid: this.abilityTarget !== null || this.canPlace(w.x, w.y) } : null;
   }
 
   // Chamado pelo pointerup global quando o arraste começou num card da barra.
@@ -476,6 +617,12 @@ export class Game {
   }
 
   handleTap(x, y) {
+    if (this.abilityTarget !== null) {
+      if (x >= 0 && x <= WORLD.W && y >= 0 && y <= WORLD.H) this._useAbility(this.abilityTarget, x, y);
+      this.abilityTarget = null;
+      this.ghost = null;
+      return;
+    }
     const drop = this.drops.find((d) => dist2(d.x, d.y - 10 / GROUND_TILT, x, y) <= DROP_HIT_R ** 2);
     if (drop) { this._collectDrop(drop); return; }
     if (this.placing) {
@@ -497,22 +644,30 @@ export class Game {
       this.handleTap(w.x, w.y);
     };
     const leave = () => { if (!this.dragging) this.ghost = null; };
-    const ctxMenu = (e) => { e.preventDefault(); this.cancelPlacing(); this.select(null); };
+    const ctxMenu = (e) => { e.preventDefault(); this.abilityTarget = null; this.cancelPlacing(); this.select(null); };
+    const outside = (e) => {
+      if (this.abilityTarget === null || e.target === this.canvas || e.target.closest?.('.ability-button')) return;
+      this.abilityTarget = null;
+      this.ghost = null;
+    };
     const key = (e) => {
-      if (e.key === 'Escape') { this.cancelPlacing(); this.select(null); }
+      if (e.key === 'Escape') { this.abilityTarget = null; this.cancelPlacing(); this.select(null); }
       else if (e.key === ' ' && e.target === document.body) { e.preventDefault(); this.startRound(); }
+      else if (!e.repeat && ['q', 'e'].includes(e.key.toLowerCase())) this.selectAbility(e.key.toLowerCase() === 'q' ? 0 : 1);
     };
     c.addEventListener('pointermove', move);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointerleave', leave);
     c.addEventListener('contextmenu', ctxMenu);
     window.addEventListener('keydown', key);
+    window.addEventListener('pointerdown', outside);
     this._unbind = () => {
       c.removeEventListener('pointermove', move);
       c.removeEventListener('pointerup', up);
       c.removeEventListener('pointerleave', leave);
       c.removeEventListener('contextmenu', ctxMenu);
       window.removeEventListener('keydown', key);
+      window.removeEventListener('pointerdown', outside);
     };
   }
 
@@ -522,9 +677,80 @@ export class Game {
       gold: Math.floor(this.gold), lives: this.lives, round: this.round, totalRounds: this.phase.rounds.length,
       roundActive: this.roundActive, speed: this.speed, autoStart: this.autoStart, over: this.over,
       boss: boss ? { name: boss.def.name, hp: Math.ceil(boss.hp), maxHp: boss.def.hp } : null,
+      preparation: this.preparation === null ? null : Math.ceil(this.preparation),
+      abilities: this.abilities.map((ability) => ability && Math.ceil(ability.remaining)),
+      abilityTarget: this.abilityTarget,
     };
     const key = JSON.stringify(s);
     if (key !== this._hudKey) { this._hudKey = key; this.cb.onHud?.(s); }
+  }
+
+  selectAbility(slot) {
+    const ability = this.abilities[slot];
+    if (!ability || ability.remaining > 0 || this.over) return;
+    this.cancelPlacing();
+    if (ability.target === 'global') { this.abilityTarget = null; this._useAbility(slot); }
+    else {
+      this.abilityTarget = this.abilityTarget === slot ? null : slot;
+      if (this.abilityTarget !== null) this.cb.onToast?.('Escolha o ponto da habilidade na arena.', 'info');
+    }
+  }
+
+  _useAbility(slot, x, y) {
+    const ability = this.abilities[slot];
+    if (!ability || ability.remaining > 0 || this.over) return;
+    ability.remaining = ability.cooldown;
+    const mark = { type: 'ring', x, y, r: ability.area, color: '#609de7', t: 0, dur: 0.5 };
+    switch (ability.type) {
+      case 'chuva_flechas':
+        for (let index = 0; index < 3; index++) {
+          this.abilityBursts.push({ x, y, power: ability.power, area: ability.area,
+            when: this.simTime + (index * ability.duration) / 2 });
+        }
+        break;
+      case 'avalanche': {
+        const distance = this.path.distanceAlong(x, y);
+        for (const enemy of [...this.enemies]) {
+          if (enemy.path === this.path && Math.abs(enemy.dist - distance) <= ability.area / 2) {
+            this.hitEnemy(enemy, ability.power, { hitsAir: true });
+          }
+        }
+        this.effects.push(mark);
+        break;
+      }
+      case 'nevasca':
+      case 'bloco_gelo':
+        for (const enemy of this.enemies) {
+          if (ability.target === 'global' || dist2(x, y, enemy.x, enemy.y) <= ability.area ** 2) {
+            const resistance = hasTrait(enemy.def, 'chefe') ? 0.5 : 1;
+            const limit = ability.type === 'bloco_gelo' ? 1 : 0.8;
+            enemy.slowPct = Math.max(enemy.slowPct, Math.min(limit, ability.power / 100) * resistance);
+            enemy.slowTimer = Math.max(enemy.slowTimer, ability.duration);
+          }
+        }
+        if (ability.target === 'area') this.effects.push(mark);
+        break;
+      case 'chamado_matilha':
+        for (let index = 0; index < Math.max(1, Math.round(ability.power)); index++) {
+          this._spawnAlly(null, { ...ALLY_DEFAULTS, allyKind: 'lobo', allySpeed: 112, allyLifetime: ability.duration }, index);
+        }
+        break;
+      case 'fogueira':
+        this.goldBoost = { until: this.simTime + ability.duration, multiplier: 1 + ability.power / 100 };
+        break;
+    }
+  }
+
+  _updateAbilities(dt) {
+    const cooldownPct = this.towers.reduce((max, tower) => Math.max(max, tower.stats.cooldownPct ?? 0), 0);
+    for (const ability of this.abilities) {
+      if (ability) ability.remaining = Math.max(0, ability.remaining - dt / Math.max(0.1, 1 - cooldownPct / 100));
+    }
+    this.abilityBursts = this.abilityBursts.filter((burst) => {
+      if (burst.when > this.simTime) return true;
+      this._explode({ splash: burst.area, damage: burst.power, hitsAir: true, hit: new Set() }, burst.x, burst.y);
+      return false;
+    });
   }
 
   // ---------- Render ----------
@@ -606,9 +832,17 @@ export class Game {
     for (const d of this.drops) this._drawDrop(ctx, d);
 
     if (this.selected) this._drawRange(ctx, this.selected.x, this.selected.y, this.selected.stats.range, true);
-    const actors = [...this.enemies, ...this.towers].sort((a, b) => a.y - b.y);
+    for (const tower of this.towers) {
+      if (!tower.stats.buffs) continue;
+      ctx.globalAlpha = 0.32 + Math.sin(this.time * 3) * 0.12;
+      this._drawRange(ctx, tower.x, tower.y, tower.stats.range, true, true);
+      ctx.globalAlpha = 1;
+    }
+    const actors = [...this.enemies, ...this.towers, ...this.allies].sort((a, b) => a.y - b.y);
     for (const actor of actors) {
       if (actor.upgrades) this._drawTower(ctx, actor);
+      else if (actor.contacts) drawFaceCached(ctx, ALLY_FACES[actor.stats.allyKind] ?? ALLY_FACES.pinguim,
+        actor.x, projectY(actor.y, 6), actor.r, this.px);
       else this._drawEnemy(ctx, actor);
     }
 
@@ -641,6 +875,9 @@ export class Game {
         ctx.globalAlpha = 1;
       }
     }
+    if (this.abilityTarget !== null && this.ghost) {
+      this._drawRange(ctx, this.ghost.x, this.ghost.y, this.abilities[this.abilityTarget].area, true, true);
+    }
 
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     for (const f of this.snow) { ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, Math.PI * 2); ctx.fill(); }
@@ -668,6 +905,14 @@ export class Game {
   _drawTower(ctx, t) {
       const y = projectY(t.y);
       drawEskimo(ctx, t.def, t.x, y, TOWER_R, t.angle, this.px);
+      if ((t.stunnedUntil ?? 0) > this.simTime) {
+        ctx.fillStyle = 'rgba(102,214,255,0.55)';
+        ctx.beginPath(); ctx.roundRect(t.x - TOWER_R, y - TOWER_R * 2, TOWER_R * 2, TOWER_R * 2, 7); ctx.fill();
+      }
+      if (t.buffed) {
+        ctx.fillStyle = '#006c67'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('+', t.x, y - TOWER_R * 2.4);
+      }
       const lv = t.upgrades.dmg + t.upgrades.spd + t.upgrades.rng + t.active.size;
       if (lv) {
         ctx.fillStyle = '#ffd32a'; ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.5;
@@ -677,9 +922,9 @@ export class Game {
       }
   }
 
-  _drawRange(ctx, x, y, r, ok) {
-    ctx.fillStyle = ok ? 'rgba(255,255,255,0.25)' : 'rgba(255,71,87,0.25)';
-    ctx.strokeStyle = ok ? 'rgba(30,60,90,0.5)' : 'rgba(255,71,87,0.8)';
+  _drawRange(ctx, x, y, r, ok, aura = false) {
+    ctx.fillStyle = aura ? '#72cfc6' : ok ? 'rgba(255,255,255,0.25)' : 'rgba(255,71,87,0.25)';
+    ctx.strokeStyle = aura ? '#0b807a' : ok ? 'rgba(30,60,90,0.5)' : 'rgba(255,71,87,0.8)';
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.ellipse(x, projectY(y), r, r * GROUND_TILT, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }

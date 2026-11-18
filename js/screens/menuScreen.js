@@ -6,7 +6,7 @@ import { getData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES } from '../data/defaults.js';
 import {
   ensureProgress, phaseUnlocked, unlockText, equippedItems, instanceItem, whoEquips,
-  canEquip, equip, unequip, fuseItems, SLOTS,
+  canEquip, equip, unequip, fuseItems, setAbilitySlot, SLOTS,
 } from '../core/progression.js';
 import {
   computeStats, skillPoints, pointsFree, canLearn, canUnlearn, effectText, itemStatsText,
@@ -14,6 +14,8 @@ import {
 } from '../game/stats.js';
 import { eskimoCanvas, itemCanvas } from '../render/faceRenderer.js';
 import { economy, fusionPool } from '../game/economy.js';
+import { raidAvailable } from '../game/raids.js';
+import { abilityStats } from '../game/abilities.js';
 
 const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
@@ -54,7 +56,16 @@ export function menuScreen(root, params = {}) {
       el('h3', { text: 'Modo Infinito' }),
       el('p', { text: `Recorde: rodada ${acc.progress.endlessBest?.melhorWave ?? 0}` }),
       el('p', { class: 'muted', text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
-      el('button', { class: 'btn btn-primary', text: 'Jogar Infinito', onclick: () => go('game', { endless: true }) })));
+      el('button', { class: 'btn btn-primary', text: 'Jogar Infinito', onclick: () => go('game', { endless: true }) })),
+    data.raids.map((raid) => {
+      const available = raidAvailable(acc, raid);
+      return el('div', { class: `card phase-card ${available ? '' : 'locked'}` },
+        el('h3', { text: raid.name }),
+        el('p', { text: `Chaves de raide: ${acc.progress.raidKeys} · Custo: ${raid.keyCost}` }),
+        !available && el('p', { class: 'muted', text: 'Ganhe uma chave a cada 15 rodadas concluídas no Infinito.' }),
+        el('button', { class: 'btn btn-primary', text: 'Entrar na raide', disabled: !available,
+          onclick: () => go('game', { raidId: raid.id }) }));
+    }));
   }
 
   // ---------- Quartel ----------
@@ -175,7 +186,22 @@ export function menuScreen(root, params = {}) {
           } catch (error) { toast(error.message, 'error'); }
         } });
       });
-    return el('div', { class: 'card' }, el('h3', { text: 'Fusão' }),
+    const active = inv.filter((entry) => instanceItem(acc, entry.uid)?.type === 'habilidade');
+    const slots = active.length ? el('section', {}, el('h3', { text: 'Habilidades ativas' }),
+      el('div', { class: 'grid-2' }, [0, 1].map((slot) => el('label', { class: 'field' },
+        el('span', { text: slot ? 'Slot E' : 'Slot Q' }),
+        el('select', {
+          value: acc.progress.activeAbilities[slot] ?? '',
+          onchange: (event) => {
+            try { setAbilitySlot(acc, slot, event.target.value || null); render(); }
+            catch (error) { toast(error.message, 'error'); }
+          },
+        }, el('option', { value: '', text: 'Vazio' }), active.map((instance) => {
+          const item = instanceItem(acc, instance.uid);
+          const stats = abilityStats(data, item);
+          return el('option', { value: instance.uid, text: `${item.name} · ${RARITIES[item.rarity].name} · ${stats?.cooldown ?? '—'}s` });
+        })))))) : null;
+    return el('div', { class: 'card' }, slots, el('h3', { text: 'Fusão' }),
       fusion.length ? el('div', { class: 'form-actions' }, fusion) :
         el('p', { class: 'muted', text: 'Junte três cópias desequipadas de um item para fundir.' }),
       el('ul', { class: 'item-list' }, inv.map((inst) => {
@@ -187,7 +213,8 @@ export function menuScreen(root, params = {}) {
           el('strong', { text: item.name }),
           el('small', { text: ` ${RARITIES[item.rarity]?.name} · ${ITEM_TYPES[item.type]}${item.classRestriction ? ` · só ${CLASSES[item.classRestriction]?.name}` : ''}` }),
           el('small', { text: itemStatsText(item) })),
-        el('span', { class: 'muted', text: owner ? `Equipado em ${byId(data.eskimos, owner)?.name}` : 'Livre' }));
+        el('span', { class: 'muted', text: owner === 'perfil' ? 'Habilidade ativa equipada' :
+          owner ? `Equipado em ${byId(data.eskimos, owner)?.name}` : 'Livre' }));
     })));
   }
 

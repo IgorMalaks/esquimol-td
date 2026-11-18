@@ -4,6 +4,7 @@ import { saveAccount } from './auth.js';
 import { skillPoints, pointsSpent } from '../game/stats.js';
 import { uid } from './utils.js';
 import { economy, fusionPool, resolveBossLoot, weightedPick } from '../game/economy.js';
+import { raidAvailable } from '../game/raids.js';
 export { rollItem } from '../game/economy.js';
 
 export const SLOTS = ['arma', 'armadura', 'amuleto'];
@@ -39,6 +40,10 @@ export function ensureProgress(acc) {
   p.eskimos ??= {};
   p.inventory ??= [];
   p.phases ??= {};
+  p.activeAbilities = [0, 1].map((slot) => {
+    const uid = p.activeAbilities?.[slot];
+    return uid && instanceItem(acc, uid)?.type === 'habilidade' ? uid : null;
+  });
   p.stats = { wins: 0, losses: 0, roundsTotal: 0, ...p.stats };
 
   p.unlocked = p.unlocked.filter((id) => byId(data.eskimos, id));
@@ -115,6 +120,7 @@ export function equippedItems(acc, eskimoId) {
 }
 
 export function whoEquips(acc, instUid) {
+  if (acc.progress.activeAbilities?.includes(instUid)) return 'perfil';
   for (const [id, ep] of Object.entries(acc.progress.eskimos)) {
     if (Object.values(ep.equip || {}).includes(instUid)) return id;
   }
@@ -124,7 +130,7 @@ export function whoEquips(acc, instUid) {
 export function equip(acc, eskimoId, instUid) {
   const item = instanceItem(acc, instUid);
   const def = byId(getData().eskimos, eskimoId);
-  if (!item || !def) throw new Error('Item ou esquimó inválido.');
+  if (!item || !def || !SLOTS.includes(item.type)) throw new Error('Item ou esquimó inválido.');
   if (!canEquip(item, def)) throw new Error('Esse item não serve para essa classe.');
   const owner = whoEquips(acc, instUid);
   if (owner) acc.progress.eskimos[owner].equip[item.type] = null;
@@ -132,9 +138,27 @@ export function equip(acc, eskimoId, instUid) {
   saveAccount(acc);
 }
 
+export function setAbilitySlot(account, slot, instUid) {
+  if ((slot !== 0 && slot !== 1) || (instUid && instanceItem(account, instUid)?.type !== 'habilidade')) {
+    throw new Error('Habilidade inválida.');
+  }
+  const slots = account.progress.activeAbilities.map((uid) => uid === instUid ? null : uid);
+  slots[slot] = instUid;
+  const progress = { ...account.progress, activeAbilities: slots };
+  saveAccount({ ...account, progress });
+  account.progress = progress;
+}
+
 export function unequip(acc, eskimoId, slot) {
   acc.progress.eskimos[eskimoId].equip[slot] = null;
   saveAccount(acc);
+}
+
+export function spendRaidKeys(account, raid) {
+  if (!raidAvailable(account, raid)) throw new Error('Chaves de raide insuficientes.');
+  const progress = { ...account.progress, raidKeys: account.progress.raidKeys - raid.keyCost };
+  saveAccount({ ...account, progress });
+  account.progress = progress;
 }
 
 export function fuseItems(acc, uids, rng = Math.random) {
@@ -209,11 +233,15 @@ export function applyMatchResult(acc, r) {
   });
   p.stats.roundsTotal += r.roundsCompleted;
   if (r.endless) {
-    p.raidKeys = Math.min(5, (p.raidKeys ?? 0) + Math.floor(r.roundsCompleted / 15));
+    p.raidKeys = Math.min(economy(data).raidKeyCap, (p.raidKeys ?? 0) + Math.floor(r.roundsCompleted / 15));
     if (r.roundsCompleted > (p.endlessBest?.melhorWave ?? 0)) {
       p.endlessBest = { melhorWave: r.roundsCompleted, data: now, duracaoSeg: r.duration,
         esquadrao: [...r.usedEskimos], seed: r.endless, modo: 'solo' };
     }
+  } else if (r.raid) {
+    p.raids ??= {};
+    const raid = (p.raids[r.raid] ??= { wins: 0, losses: 0 });
+    raid[r.victory ? 'wins' : 'losses']++;
   } else {
     if (r.victory) p.stats.wins++; else p.stats.losses++;
     const ph = (p.phases[r.phaseId] ??= { completed: false, bestRound: 0 });

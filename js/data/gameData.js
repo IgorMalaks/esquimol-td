@@ -2,6 +2,9 @@
 import { storage } from '../core/storage.js';
 import { createDefaultData } from './defaults.js';
 import { migrateData } from './migrations.js';
+import { hasTrait } from '../game/enemies.js';
+import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
+import { DEFAULT_ECONOMY, economy } from '../game/economy.js';
 
 let cache = null;
 
@@ -29,6 +32,52 @@ export function prepareData(data) {
   const next = migrateData(data);
   for (const key of ['abilities', 'raids', 'biomes']) {
     if (!Array.isArray(next[key])) throw new Error(`Dados inválidos: "${key}" ausente.`);
+  }
+  for (const ability of next.abilities) {
+    if (!Object.hasOwn(ABILITY_TYPES, ability.type) || ['power', 'area', 'duration'].some((key) =>
+      ability[key] !== undefined && (!Number.isFinite(ability[key]) || ability[key] < 0))) {
+      throw new Error(`Habilidade inválida: "${ability.name}".`);
+    }
+  }
+  for (const item of next.items) {
+    if (item.type === 'habilidade' && !byId(next.abilities, item.abilityId)) {
+      throw new Error(`O item "${item.name}" precisa de uma habilidade válida.`);
+    }
+  }
+  const settings = economy(next);
+  const probability = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+  if (!probability(settings.dropRateMultiplier) || !probability(settings.chestChance) || !probability(settings.fusionChance) ||
+      !Number.isInteger(settings.legendaryThreshold) || settings.legendaryThreshold < 1 ||
+      !Number.isInteger(settings.raidKeyCap) || settings.raidKeyCap < 1 || settings.raidKeyCap > 100 ||
+      [1, 2, 3].some((tier) => !Number.isFinite(settings.legendaryFactors?.[tier]) || settings.legendaryFactors[tier] <= 0) ||
+      Object.keys(DEFAULT_ECONOMY.weights).some((source) => {
+        const values = Object.values(settings.weights?.[source] ?? {});
+        return values.some((weight) => !Number.isFinite(weight) || weight < 0) || !values.some((weight) => weight > 0);
+      }) || Object.keys(ABILITY_SCALES).some((rarity) => Object.keys(ABILITY_SCALES[rarity]).some((key) => {
+        const value = (settings.abilityScales ?? ABILITY_SCALES)[rarity]?.[key];
+        return !Number.isFinite(value) || value <= 0;
+      }))) {
+    throw new Error('Configuração de economia inválida.');
+  }
+  for (const raid of next.raids) {
+    if (!byId(next.maps, raid.mapId) || !hasTrait(byId(next.enemies, raid.bossId) ?? {}, 'chefe')) {
+      throw new Error(`A raide "${raid.name}" precisa de um mapa e de um inimigo com traço Chefe.`);
+    }
+    if (!Array.isArray(raid.farmRounds) || !raid.farmRounds.length ||
+        raid.farmRounds.some((round) => !round.groups?.length || round.groups.some((group) => !byId(next.enemies, group.enemyId)))) {
+      throw new Error(`Rodadas de farm inválidas na raide "${raid.name}".`);
+    }
+    const { bossAbility, bossLoot, bossPhases } = raid;
+    if (!Number.isInteger(raid.keyCost) || raid.keyCost < 1 || raid.keyCost > settings.raidKeyCap ||
+        !Number.isFinite(raid.prepTime) || raid.prepTime < 0 || !(raid.farmGoldMultiplier > 0) ||
+        bossAbility?.type !== 'atordoar' || !(bossAbility.interval > 0) || !(bossAbility.radius > 0) || !(bossAbility.duration > 0) ||
+        !Array.isArray(bossPhases) || bossPhases.some((stage, index) =>
+          !(stage.hp > 0 && stage.hp < (bossPhases[index - 1]?.hp ?? 1)) ||
+          !(stage.speedMultiplier > 0) || !byId(next.enemies, stage.escortId) ||
+          !Number.isInteger(stage.escortCount) || stage.escortCount < 0 || stage.escortCount > 40) ||
+        bossLoot?.source !== 'raidBoss' || !Number.isInteger(bossLoot.rolls) || bossLoot.rolls < 1 || bossLoot.rolls > 10) {
+      throw new Error(`Configuração inválida na raide "${raid.name}".`);
+    }
   }
   return next;
 }

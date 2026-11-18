@@ -28,12 +28,17 @@ export class Path {
     return { x: s.a.x + s.dx * t, y: s.a.y + s.dy * t };
   }
 
-  distanceTo(x, y) {
+  nearestPoint(x, y) {
     let best = Infinity;
+    let along = 0;
     for (const s of this.segs) {
       const t = Math.max(0, Math.min(s.len, (x - s.a.x) * s.dx + (y - s.a.y) * s.dy));
-      best = Math.min(best, Math.hypot(x - (s.a.x + s.dx * t), y - (s.a.y + s.dy * t)));
+      const distance = Math.hypot(x - (s.a.x + s.dx * t), y - (s.a.y + s.dy * t));
+      if (distance < best) { best = distance; along = s.start + t; }
     }
-    return best;
+    return { distance: best, along };
   }
+
+  distanceTo(x, y) { return this.nearestPoint(x, y).distance; }
+  distanceAlong(x, y) { return this.nearestPoint(x, y).along; }
 }

@@ -1,14 +1,17 @@
 // Conteúdo padrão do jogo. Tudo aqui é editável pelo Painel Admin;
 // este arquivo só é usado na primeira execução ou em "Restaurar padrões".
 import { migrateData } from './migrations.js';
+import { ABILITY_TYPES } from '../game/abilities.js';
 export { DATA_VERSION } from './migrations.js';
 
 // Classes = comportamento (código). Esquimós = instâncias (dados) — ver ADR-007.
 export const CLASSES = {
-  arqueiro: { name: 'Arqueiro', projectile: 'flecha', desc: 'Tiros rápidos e precisos.' },
-  bolanev: { name: 'Lançador de Bolas de Neve', projectile: 'bola', desc: 'Dano em área.' },
-  arpoador: { name: 'Arpoador', projectile: 'arpao', desc: 'Atravessa vários inimigos.' },
-  mago: { name: 'Mago do Gelo', projectile: 'gelo', desc: 'Desacelera os inimigos.' },
+  arqueiro: { name: 'Arqueiro', role: 'atacante', hitsAir: false, projectile: 'flecha', desc: 'Tiros rápidos e precisos.' },
+  bolanev: { name: 'Lançador de Bolas de Neve', role: 'atacante', hitsAir: false, projectile: 'bola', desc: 'Dano em área.' },
+  arpoador: { name: 'Arpoador', role: 'atacante', hitsAir: true, projectile: 'arpao', desc: 'Atravessa vários inimigos.' },
+  mago: { name: 'Mago do Gelo', role: 'atacante', hitsAir: true, projectile: 'gelo', desc: 'Desacelera os inimigos.' },
+  domador: { name: 'Domador', role: 'invocador', hitsAir: false, desc: 'Envia aliados da base.' },
+  xama: { name: 'Xamã', role: 'suporte', hitsAir: false, desc: 'Fortalece as torres próximas.' },
 };
 
 export const FACE_OPTIONS = {
@@ -24,7 +27,7 @@ export const DEFAULT_FACE = {
   headwear: 'capuz', headwearColor: '#3a7bd5', accessory: 'nenhum', accessoryColor: '#d63a3a', outline: '#1b1b1b',
 };
 
-export const ITEM_TYPES = { arma: 'Arma', armadura: 'Armadura', amuleto: 'Amuleto' };
+export const ITEM_TYPES = { arma: 'Arma', armadura: 'Armadura', amuleto: 'Amuleto', habilidade: 'Habilidade' };
 export const RARITIES = {
   comum: { name: 'Comum', color: '#9aa5ab', weight: 60 },
   incomum: { name: 'Incomum', color: '#187542', weight: 25 },
@@ -96,6 +99,28 @@ function eskimos() {
         [3, 1, 'Brisa', 'slowPct', 10], [3, 2, 'Visão Boreal', 'rangePct', 20], [3, 3, 'Coração do Inverno', 'multishot', 2],
       ]),
     },
+    {
+      id: 'tuktu', name: 'Tuktu', classId: 'domador', bodyColor: '#6f633e', cost: 375,
+      face: face({ headwear: 'orelhas', headwearColor: '#6f633e', accessory: 'cachecol', accessoryColor: '#8d573b' }),
+      stats: {}, summon: { allyKind: 'pinguim' },
+      unlock: { type: 'wins', value: 3 }, branches: ['Matilha', 'Urso Polar', 'Foca Gelada'],
+      tree: tree('tuktu', [
+        [1, 1, 'Dupla', 'summonCount', 1], [1, 2, 'Bando', 'maxAllies', 2], [1, 3, 'Lobos', 'allyKind', 3],
+        [2, 1, 'Resistência', 'allyHp', 2], [2, 2, 'Patada', 'allyDamage', 1], [2, 3, 'Ursos', 'allyKind', 2],
+        [3, 1, 'Frio no caminho', 'allySlowPct', 20], [3, 2, 'Mergulho longo', 'allyLifetime', 4], [3, 3, 'Estouro de gelo', 'allyExplode', 40],
+      ]),
+    },
+    {
+      id: 'aaju', name: 'Aaju', classId: 'xama', bodyColor: '#336963', cost: 325,
+      face: face({ headwear: 'gorro', headwearColor: '#336963', accessory: 'cicatriz' }),
+      stats: { range: 120 }, buffs: [{ key: 'damage', value: 1 }],
+      unlock: { type: 'rounds', value: 40 }, branches: ['Tambor de Guerra', 'Luneta Polar', 'Totem'],
+      tree: tree('aaju', [
+        [1, 1, 'Tambor', 'buffDamage', 1], [1, 2, 'Ritmo rápido', 'buffSpeedPct', 15], [1, 3, 'Trovão', 'buffDamage', 2],
+        [2, 1, 'Luneta', 'buffRangePct', 10], [2, 2, 'Antiaéreo', 'buffAntiAereo', 1], [2, 3, 'Ponta longa', 'buffPierce', 2],
+        [3, 1, 'Totem maior', 'auraRangePct', 20], [3, 2, 'Oferenda', 'auraGold', 30], [3, 3, 'Recarga do totem', 'auraCooldown', 15],
+      ]),
+    },
   ];
 }
 
@@ -130,6 +155,11 @@ function items() {
     it('cajado_boreal', 'Cajado Boreal', 'arma', 'lendario', { slowPct: 15, damage: 1 }, 'mago'),
     { ...it('estrela_polar', 'Estrela Polar', 'amuleto', 'lendario', { damage: 1, rangePct: 12 }), powerTier: 2 },
     { ...it('coroa_glacial', 'Coroa Glacial', 'armadura', 'mitico', { speedPct: 25, rangePct: 20 }), powerTier: 3 },
+    ...Object.entries(ABILITY_TYPES).flatMap(([abilityId, { name }]) =>
+      Object.entries(RARITIES).map(([rarity, info]) => ({
+        id: `${abilityId}_${rarity}`, name, abilityId, type: 'habilidade', rarity,
+        powerTier: 2, stats: {}, dropWeight: info.weight / 2, classRestriction: '',
+      }))),
   ];
 }
 
@@ -176,5 +206,18 @@ function phases() {
 }
 
 export function createDefaultData() {
-  return migrateData({ version: 1, eskimos: eskimos(), enemies: enemies(), items: items(), maps: maps(), phases: phases() });
+  return migrateData({
+    version: 1, eskimos: eskimos(), enemies: enemies(), items: items(), maps: maps(), phases: phases(),
+    abilities: Object.entries(ABILITY_TYPES).map(([type, details]) => ({ id: type, type, name: details.name })),
+    raids: [{
+      id: 'rei_iceberg', name: 'Covil do Rei Iceberg', mapId: 'serpente', startGold: 900, lives: 100,
+      keyCost: 1, farmGoldMultiplier: 1.5, prepTime: 30, bossId: 'chefe',
+      farmRounds: [{ groups: [g('azul', 15, 0.35), g('verde', 10, 0.6, 5)] },
+        { groups: [g('pedra', 4, 2), g('rosa', 15, 0.4, 2)] }],
+      bossAbility: { type: 'atordoar', interval: 12, radius: 140, duration: 3 },
+      bossPhases: [{ hp: 0.66, speedMultiplier: 1.25, escortId: 'azul', escortCount: 5 },
+        { hp: 0.33, speedMultiplier: 1.25, escortId: 'pedra', escortCount: 2 }],
+      bossLoot: { source: 'raidBoss', rolls: 2 },
+    }],
+  });
 }

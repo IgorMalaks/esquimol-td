@@ -7,6 +7,9 @@ import { getData, saveData, resetData, prepareData, byId } from '../data/gameDat
 import { CLASSES, ITEM_TYPES, RARITIES, DEFAULT_FACE } from '../data/defaults.js';
 import { EFFECT_KEYS, BASE_STATS, computeStats } from '../game/stats.js';
 import { ENEMY_TRAITS, roundsHaveAir } from '../game/enemies.js';
+import { ALLY_DEFAULTS, ALLY_OPTIONS, BUFF_KEYS } from '../game/roles.js';
+import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
+import { economy, RARITY_ORDER } from '../game/economy.js';
 import { rbe, layerChain } from '../core/progression.js';
 import { createFaceEditor } from '../ui/faceEditor.js';
 import { drawEskimo, eskimoCanvas, faceCanvas, itemCanvas } from '../render/faceRenderer.js';
@@ -120,9 +123,16 @@ function newEskimo() {
 function eskimoForm(draft) {
   const data = getData();
   let editor;
+  function refreshClass() {
+    const role = CLASSES[base.inputs.classId.value]?.role ?? 'atacante';
+    attackerSection.hidden = role !== 'atacante';
+    summonSection.hidden = role !== 'invocador';
+    supportSection.hidden = role !== 'suporte';
+    editor?.redraw();
+  }
   const base = fieldsForm(draft, [
     { key: 'name', label: 'Nome' },
-    { key: 'classId', label: 'Classe', type: 'select', options: Object.entries(CLASSES).map(([id, c]) => [id, c.name]), onInput: () => editor?.redraw() },
+    { key: 'classId', label: 'Classe', type: 'select', options: Object.entries(CLASSES).map(([id, c]) => [id, c.name]), onInput: refreshClass },
     { key: 'bodyColor', label: 'Cor da parka', type: 'color', onInput: () => editor?.redraw() },
     { key: 'cost', label: 'Custo na partida (ouro)', type: 'number', min: 0, step: 5 },
     { key: 'unlock.type', label: 'Condição de desbloqueio', type: 'select', options: UNLOCK_TYPES },
@@ -132,6 +142,27 @@ function eskimoForm(draft) {
     key: `stats.${k}`, label: { damage: 'Dano', range: 'Alcance (px)', fireRate: 'Ataques/s', pierce: 'Perfuração', projectileSpeed: 'Vel. projétil', splash: 'Área (px)', slowPct: 'Lentidão %', slowDuration: 'Duração lentidão (s)' }[k],
     type: 'number', step: ['fireRate', 'slowDuration'].includes(k) ? 0.1 : 1, min: 0,
   })), 'grid-4');
+  const summonFields = fieldsForm({ ...ALLY_DEFAULTS, ...draft.summon }, [
+    { key: 'summonInterval', label: 'Intervalo (s)', type: 'number', min: 0.2, step: 0.1 },
+    { key: 'summonCount', label: 'Aliados por invocação', type: 'number', min: 1, max: 20 },
+    { key: 'maxAllies', label: 'Limite de aliados', type: 'number', min: 1, max: 40 },
+    { key: 'allyHp', label: 'Vida do aliado', type: 'number', min: 1 },
+    { key: 'allyDamage', label: 'Dano do aliado', type: 'number', min: 1 },
+    { key: 'allySpeed', label: 'Velocidade do aliado', type: 'number', min: 1 },
+    { key: 'allyLifetime', label: 'Duração do aliado (s)', type: 'number', min: 1 },
+    { key: 'allyKind', label: 'Visual do aliado', type: 'select', options: ALLY_OPTIONS.map((value) => [value, value]) },
+  ]);
+  const supportFields = fieldsForm({
+    range: draft.classId === 'xama' ? draft.stats.range : 120,
+    ...Object.fromEntries((draft.buffs ?? [{ key: 'damage', value: 1 }]).map(({ key, value }) => [key, value])),
+  }, [
+    { key: 'range', label: 'Raio da aura', type: 'number', min: 1 },
+    ...BUFF_KEYS.map((key) => ({ key, label: EFFECT_KEYS[key]?.label ?? 'Antiaéreo (0 ou 1)', type: 'number', min: 0 })),
+  ]);
+  const attackerSection = section('Atributos base', stats.node);
+  const summonSection = section('Invocação', summonFields.node);
+  const supportSection = section('Aura de suporte', supportFields.node);
+  refreshClass();
 
   editor = createFaceEditor(draft.face, {
     extraPreview: (ctx, face) => drawEskimo(ctx, { ...draft, classId: base.inputs.classId?.value || draft.classId, bodyColor: base.inputs.bodyColor?.value || draft.bodyColor, face }, 130, 238, 76, 0, 1),
@@ -161,11 +192,30 @@ function eskimoForm(draft) {
       el('datalist', { id: 'phase-ids' }, data.phases.map((p) => el('option', { value: p.id, text: p.name }))),
       section('Aparência (Criador Visual)', editor.node),
       section('Identidade e desbloqueio', base.node),
-      section('Atributos base', stats.node),
+      attackerSection, summonSection, supportSection,
       section('Árvore de habilidades (3 caminhos × 3 níveis)', treeGrid)),
     read(target) {
       base.read(target);
-      stats.read(target);
+      const role = CLASSES[target.classId]?.role ?? 'atacante';
+      if (role === 'atacante') stats.read(target);
+      if (role === 'invocador') {
+        target.summon ??= {};
+        summonFields.read(target.summon);
+        if (target.summon.summonInterval < 0.2 || Object.keys(ALLY_DEFAULTS).some((key) =>
+          key !== 'allyKind' && key !== 'allyExplode' && key !== 'allySlowPct' && target.summon[key] <= 0)) {
+          throw new Error('Os atributos de invocação precisam ser positivos.');
+        }
+        if (!Number.isInteger(target.summon.summonCount) || target.summon.summonCount > 20 ||
+          !Number.isInteger(target.summon.maxAllies) || target.summon.maxAllies > 40) {
+          throw new Error('Use até 20 aliados por invocação e limite de até 40 aliados.');
+        }
+      }
+      if (role === 'suporte') {
+        const values = {};
+        supportFields.read(values);
+        target.stats = { range: Math.max(1, values.range) };
+        target.buffs = BUFF_KEYS.filter((key) => values[key] > 0).map((key) => ({ key, value: values[key] }));
+      }
       target.face = editor.getFace();
       if (['wins', 'rounds'].includes(target.unlock.type)) target.unlock.value = Number(target.unlock.value) || 0;
       if (target.unlock.type === 'phase' && !byId(getData().phases, target.unlock.value)) throw new Error('Fase de desbloqueio inexistente.');
@@ -300,24 +350,121 @@ function phaseForm(draft) {
 
 // ---------- Aba 4: Itens ----------
 function itemForm(draft) {
+  const definitions = getData().abilities;
   const f = fieldsForm(draft, [
     { key: 'name', label: 'Nome' },
-    { key: 'type', label: 'Tipo (slot)', type: 'select', options: Object.entries(ITEM_TYPES) },
+    { key: 'type', label: 'Tipo (slot)', type: 'select', options: Object.entries(ITEM_TYPES),
+      onInput: () => { ability.node.hidden = f.inputs.type.value !== 'habilidade'; } },
     { key: 'rarity', label: 'Raridade', type: 'select', options: Object.entries(RARITIES).map(([k, v]) => [k, v.name]) },
     { key: 'powerTier', label: 'Força dentro da raridade', type: 'select', options: [['1', '1'], ['2', '2'], ['3', '3']] },
     { key: 'classRestriction', label: 'Restrito à classe', type: 'select', options: [['', 'Qualquer classe'], ...Object.entries(CLASSES).map(([k, v]) => [k, v.name])] },
     { key: 'dropWeight', label: 'Peso no sorteio de drop', type: 'number', min: 0, step: 1, hint: '0 = nunca dropa' },
   ]);
-  const st = fieldsForm(draft, Object.entries(EFFECT_KEYS).map(([k, v]) => ({ key: `stats.${k}`, label: v.label, type: 'number', step: 1 })), 'grid-4');
+  const ability = fieldsForm(draft, [
+    { key: 'abilityId', label: 'Habilidade ativa', type: 'select', options: [['', 'Selecione'], ...definitions.map((definition) => [definition.id, definition.name])] },
+  ]);
+  ability.node.hidden = draft.type !== 'habilidade';
+  const st = fieldsForm(draft, Object.entries(EFFECT_KEYS).filter(([key]) =>
+    !/^(ally|aura|buff|summon|maxAllies)/.test(key)).map(([k, v]) =>
+    ({ key: `stats.${k}`, label: v.label, type: 'number', step: 1 })), 'grid-4');
   return {
-    node: el('div', {}, section('Item', f.node), section('Bônus permanentes (0 = sem bônus)', st.node)),
+    node: el('div', {}, section('Item', f.node, ability.node), section('Bônus permanentes (0 = sem bônus)', st.node)),
     read(target) {
       f.read(target);
       st.read(target);
+      if (target.type === 'habilidade') ability.read(target);
+      else delete target.abilityId;
       target.powerTier = Number(target.powerTier) || 1;
       for (const k of Object.keys(target.stats)) if (!target.stats[k]) delete target.stats[k];
     },
   };
+}
+
+const numberField = (key, label, min = 0, step = 1) => ({ key, label, min, step, type: 'number' });
+
+function abilityForm(draft) {
+  const metadata = ABILITY_TYPES[draft.type] ?? Object.values(ABILITY_TYPES)[0];
+  const form = fieldsForm({ ...metadata, ...draft }, [
+    { key: 'name', label: 'Nome' },
+    { key: 'type', label: 'Comportamento', type: 'select', options: Object.entries(ABILITY_TYPES).map(([id, value]) => [id, value.name]) },
+    numberField('power', 'Poder base', 0, 0.1),
+    numberField('area', 'Área base (px)'),
+    numberField('duration', 'Duração base (s)', 0, 0.1),
+  ]);
+  form.inputs.type.addEventListener('input', (event) => {
+    const base = ABILITY_TYPES[event.target.value];
+    for (const key of ['power', 'area', 'duration']) form.inputs[key].value = base[key];
+  });
+  return form;
+}
+
+function raidForm(draft) {
+  const data = getData();
+  const phase = phaseForm({ ...draft, rounds: draft.farmRounds });
+  const enemies = (boss) => data.enemies.filter((enemy) => Boolean(enemy.traits?.includes('chefe')) === boss)
+    .map((enemy) => [enemy.id, enemy.name]);
+  const rules = fieldsForm(draft, [
+    numberField('keyCost', 'Custo em chaves', 1),
+    numberField('farmGoldMultiplier', 'Multiplicador de ouro no farm', 0.1, 0.1),
+    numberField('prepTime', 'Preparação (s)'),
+    { key: 'bossId', label: 'Chefe', type: 'select', options: enemies(true) },
+    numberField('bossAbility.interval', 'Intervalo do atordoamento (s)', 1),
+    numberField('bossAbility.radius', 'Raio do atordoamento', 1),
+    numberField('bossAbility.duration', 'Duração do atordoamento (s)', 0.1, 0.1),
+    numberField('bossLoot.rolls', 'Sorteios do chefe', 1),
+  ]);
+  const stages = draft.bossPhases.map((stage, index) => fieldsForm(stage, [
+    numberField('hp', `Fase ${index + 1} · fração da vida`, 0.01, 0.01),
+    numberField('speedMultiplier', 'Velocidade ×', 0.1, 0.05),
+    { key: 'escortId', label: 'Escolta', type: 'select', options: enemies(false) },
+    numberField('escortCount', 'Quantidade'),
+  ], 'grid-4'));
+  return {
+    node: el('div', {}, phase.node, section('Raide e chefe', rules.node, stages.map((stage) => stage.node))),
+    read(target) {
+      phase.read(target);
+      target.farmRounds = target.rounds;
+      delete target.rounds;
+      rules.read(target);
+      stages.forEach((form, index) => form.read(target.bossPhases[index]));
+    },
+  };
+}
+
+function economyTab() {
+  const draft = clone(economy(getData()));
+  draft.abilityScales ??= clone(ABILITY_SCALES);
+  const groups = [
+    ['Regras de economia', [
+      numberField('dropRateMultiplier', 'Multiplicador de drops (0 a 1)', 0, 0.01),
+      numberField('chestChance', 'Chance de baú (0 a 1)', 0, 0.01),
+      numberField('fusionChance', 'Chance de fusão (0 a 1)', 0, 0.01),
+      numberField('legendaryThreshold', 'Chefes até a garantia', 1),
+      numberField('raidKeyCap', 'Limite de chaves', 1),
+      ...[1, 2, 3].map((tier) => numberField(`legendaryFactors.${tier}`, `Peso na garantia · força ${tier}`, 0.01, 0.01)),
+    ]],
+    ...[['normal', 'Fases e Infinito'], ['raidFarm', 'Farm da raide'], ['raidBoss', 'Chefe da raide']].map(([source, label]) =>
+      [label, (source === 'raidBoss' ? RARITY_ORDER.slice(2) : RARITY_ORDER.slice(0, -1))
+        .map((rarity) => numberField(`weights.${source}.${rarity}`, RARITIES[rarity].name, 0, 0.01))]),
+    ...RARITY_ORDER.map((rarity) => [`Habilidades · ${RARITIES[rarity].name}`,
+      Object.entries({ cooldown: 'Recarga (s)', power: 'Poder ×', area: 'Área ×', duration: 'Duração ×' })
+        .map(([key, label]) => numberField(`abilityScales.${rarity}.${key}`, label, 0.01, 0.01))]),
+  ].map(([label, defs]) => ({ label, form: fieldsForm(draft, defs) }));
+  const fusion = RARITY_ORDER.slice(0, 4).map((rarity) => {
+    const input = el('input', { type: 'checkbox', checked: draft.fusionAllowed[rarity] });
+    return { rarity, input, node: el('label', {}, input, ` ${RARITIES[rarity].name}`) };
+  });
+  return el('div', { class: 'card data-tab' },
+    groups.map(({ label, form }) => section(label, form.node)),
+    section('Raridades que podem subir por fusão', el('div', { class: 'grid-4' }, fusion.map((entry) => entry.node))),
+    el('button', { class: 'btn btn-primary', text: 'Salvar economia', onclick: () => {
+      try {
+        for (const { form } of groups) form.read(draft);
+        for (const { rarity, input } of fusion) draft.fusionAllowed[rarity] = input.checked;
+        saveData({ ...getData(), economy: draft });
+        toast('Economia salva.', 'success');
+      } catch (error) { toast(error.message, 'error'); }
+    } }));
 }
 
 // ---------- Aba 5: Dados ----------
@@ -374,7 +521,8 @@ function dataTab() {
 
 // ---------- Tela ----------
 let rootEl = null;
-const TABS = [['eskimos', 'Esquimós'], ['enemies', 'Inimigos'], ['phases', 'Fases & Rodadas'], ['items', 'Itens & Armas'], ['data', 'Dados']];
+const TABS = [['eskimos', 'Esquimós'], ['enemies', 'Inimigos'], ['phases', 'Fases & Rodadas'], ['items', 'Itens & Armas'],
+  ['raids', 'Raides'], ['abilities', 'Habilidades'], ['economy', 'Economia'], ['data', 'Dados']];
 
 function render() {
   const content = {
@@ -395,6 +543,30 @@ function render() {
       newEntity: () => ({ id: '', name: '', type: 'arma', rarity: 'comum', classRestriction: '', dropWeight: 60, stats: { damage: 1 } }),
       buildForm: itemForm,
     }),
+    raids: () => entityTab({
+      key: 'raids', prefix: 'raide', newLabel: 'Raide', thumb: () => el('span', { class: 'phase-thumb' }),
+      sub: (raid) => `${raid.farmRounds.length} rodadas de farm`, buildForm: raidForm,
+      newEntity: () => {
+        const data = getData();
+        const escort = data.enemies.find((enemy) => !enemy.traits?.includes('chefe'))?.id;
+        return { id: '', name: '', mapId: data.maps[0]?.id, startGold: 900, lives: 100,
+          keyCost: 1, farmGoldMultiplier: 1.5, prepTime: 30,
+          bossId: data.enemies.find((enemy) => enemy.traits?.includes('chefe'))?.id,
+          farmRounds: [{ groups: [{ enemyId: escort, count: 10, interval: 0.8, delay: 0 }] }],
+          bossAbility: { type: 'atordoar', interval: 12, radius: 140, duration: 3 },
+          bossPhases: [0.66, 0.33].map((hp) => ({ hp, speedMultiplier: 1.25, escortId: escort, escortCount: 3 })),
+          bossLoot: { source: 'raidBoss', rolls: 2 },
+        };
+      },
+    }),
+    abilities: () => entityTab({
+      key: 'abilities', prefix: 'habilidade', newLabel: 'Habilidade', thumb: () => el('span', { class: 'phase-thumb' }),
+      sub: (ability) => ABILITY_TYPES[ability.type]?.name, buildForm: abilityForm,
+      newEntity: () => ({ id: '', name: '', type: 'chuva_flechas' }),
+      blockDelete: (ability, data) => data.items.some((item) => item.abilityId === ability.id) ?
+        'Existe um item que usa esta habilidade.' : null,
+    }),
+    economy: economyTab,
     data: dataTab,
   }[state.tab]();
 

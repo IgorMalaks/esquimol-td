@@ -5,6 +5,8 @@ export const DEFAULT_ECONOMY = {
   legendaryThreshold: 8,
   legendaryFactors: { 1: 4, 2: 1.5, 3: 0.5 },
   fusionChance: 0.2,
+  raidKeyCap: 5,
+  fusionAllowed: { comum: true, incomum: true, raro: true, epico: true },
   weights: {
     normal: { comum: 55, incomum: 25, raro: 13, epico: 6, lendario: 0.9, mitico: 0 },
     raidFarm: { comum: 35, incomum: 30, raro: 20, epico: 12, lendario: 2.8, mitico: 0 },
@@ -13,7 +15,7 @@ export const DEFAULT_ECONOMY = {
 };
 
 export function economy(data) {
-  return data.economy ?? DEFAULT_ECONOMY;
+  return data.economy ? { ...DEFAULT_ECONOMY, ...data.economy } : DEFAULT_ECONOMY;
 }
 
 export function weightedPick(entries, weight, rng) {
@@ -30,9 +32,10 @@ export function weightedPick(entries, weight, rng) {
 
 export function rollItem(data, rng = Math.random, source = 'normal') {
   const pool = data.items.filter((item) => Number(item.dropWeight) > 0);
-  const weights = economy(data).weights[source];
+  const weights = economy(data).weights[source] ?? {};
   const available = new Set(pool.map((item) => item.rarity));
-  const rarity = weightedPick(RARITY_ORDER, (id) => available.has(id) ? weights[id] : 0, rng);
+  const rarity = weightedPick(RARITY_ORDER, (id) =>
+    available.has(id) && (id !== 'mitico' || source === 'raidBoss') ? weights[id] : 0, rng);
   return weightedPick(pool.filter((item) => item.rarity === rarity), (item) => item.dropWeight, rng);
 }
 
@@ -49,7 +52,7 @@ export function resolveBossLoot(data, pity, drops, rng = Math.random) {
 
 export function fusionPool(data, item) {
   const index = RARITY_ORDER.indexOf(item.rarity);
-  if (index < 0 || index >= RARITY_ORDER.indexOf('lendario')) return [];
+  if (index < 0 || index >= RARITY_ORDER.indexOf('lendario') || !economy(data).fusionAllowed[item.rarity]) return [];
   const next = data.items.filter((other) =>
     other.rarity === RARITY_ORDER[index + 1] && Number(other.dropWeight) > 0);
   const sameSlot = next.filter((other) => other.type === item.type);

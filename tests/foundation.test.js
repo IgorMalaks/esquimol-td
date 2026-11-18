@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDefaultData } from '../js/data/defaults.js';
 import { prepareData } from '../js/data/gameData.js';
-import { applyMatchResult, ensureProgress, fuseItems, migrateProgress } from '../js/core/progression.js';
+import { applyMatchResult, ensureProgress, fuseItems, migrateProgress, setAbilitySlot, spendRaidKeys } from '../js/core/progression.js';
 import { canHitEnemy, roundsHaveAir } from '../js/game/enemies.js';
 import { computeStats } from '../js/game/stats.js';
 import { projectY, groundY } from '../js/game/game.js';
 import { endlessRound } from '../js/game/endless.js';
 import { resolveBossLoot, rollItem } from '../js/game/economy.js';
 import { seededRandom } from '../js/core/utils.js';
+import { abilityStats } from '../js/game/abilities.js';
+import { applyAuras, summonerStats } from '../js/game/roles.js';
+import { raidPhase } from '../js/game/raids.js';
+import { SpatialGrid } from '../js/game/spatialGrid.js';
 
 Object.defineProperty(globalThis, 'localStorage', {
   value: {
@@ -24,6 +28,7 @@ test('migra conteúdo antigo mantendo IDs, alterações e referências', () => {
   data.eskimos[0].cost = 315;
   delete data.eskimos[0].damageType;
   delete data.abilities;
+  data.items = data.items.filter((item) => item.type !== 'habilidade');
   const migrated = prepareData(data);
   assert.equal(migrated.version, 2);
   assert.equal(migrated.eskimos[0].id, data.eskimos[0].id);
@@ -115,4 +120,60 @@ test('a seed do Infinito reproduz a rodada e inclui chefes a cada 25', () => {
   assert.deepEqual(wave, endlessRound(data, 25, 'qa'));
   assert.notDeepEqual(wave, endlessRound(data, 25, 'outra'));
   assert.equal(wave.groups.at(-1).enemyId, 'chefe');
+});
+
+test('suporte aplica apenas o maior bônus por tipo', () => {
+  const archer = createDefaultData().eskimos[0];
+  const tower = { x: 0, y: 0, stats: computeStats(archer) };
+  const support = (x, buffs) => ({ x, y: 0, stats: { range: 120, buffs } });
+  applyAuras(tower, [support(10, { damage: 1 }), support(20, { damage: 2, antiAereo: 1 }), support(130, { damage: 9 })]);
+  assert.equal(tower.stats.damage, 3);
+  assert.equal(tower.stats.hitsAir, 1);
+  assert.equal(tower.buffed, true);
+});
+
+test('upgrades do Domador alteram dano, intervalo e vida do aliado', () => {
+  const domador = createDefaultData().eskimos.find((eskimo) => eskimo.classId === 'domador');
+  const stats = summonerStats(domador, [], { dmg: 1, spd: 1, rng: 1 });
+  assert.equal(stats.allyDamage, 2);
+  assert.equal(stats.summonInterval, 3.4);
+  assert.equal(stats.allyHp, 4);
+});
+
+test('a grade considera raios grandes próximos a fronteiras entre células', () => {
+  const grid = new SpatialGrid(80);
+  const giant = { x: 82, y: -1, r: 40 };
+  const far = { x: 800, y: 0, r: 3 };
+  grid.add(giant);
+  grid.add(far);
+  assert.deepEqual([...grid.near(74, 1, 4)], [giant]);
+  grid.clear();
+  assert.deepEqual([...grid.near(74, 1, 4)], []);
+});
+
+test('chaves do Infinito são limitadas e gastas por raide', () => {
+  const acc = ensureProgress({ username: 'Raide' });
+  const data = createDefaultData();
+  const raid = data.raids[0];
+  assert.throws(() => spendRaidKeys(acc, raid), /insuficientes/);
+  applyMatchResult(acc, { endless: 'qa', duration: 120, roundsCompleted: 90, items: [], usedEskimos: [] });
+  assert.equal(acc.progress.raidKeys, 5);
+  assert.equal(acc.progress.endlessBest.melhorWave, 90);
+  spendRaidKeys(acc, raid);
+  assert.equal(acc.progress.raidKeys, 4);
+  assert.equal(raidPhase(raid).rounds.at(-1).groups[0].enemyId, raid.bossId);
+  assert.equal(prepareData(data).raids.length, 1);
+});
+
+test('escala habilidades por raridade e impede equipar a mesma cópia em dois slots', () => {
+  const data = createDefaultData();
+  const common = abilityStats(data, data.items.find((item) => item.id === 'nevasca_comum'));
+  const legendary = abilityStats(data, data.items.find((item) => item.id === 'nevasca_lendario'));
+  assert.deepEqual([common.cooldown, common.power, common.duration], [120, 20, 3]);
+  assert.deepEqual([legendary.cooldown, legendary.power, legendary.duration], [60, 52, 6]);
+  const account = ensureProgress({ username: 'Habilidade' });
+  account.progress.inventory = [{ uid: 'nevasca', itemId: 'nevasca_comum' }];
+  setAbilitySlot(account, 0, 'nevasca');
+  setAbilitySlot(account, 1, 'nevasca');
+  assert.deepEqual(account.progress.activeAbilities, [null, 'nevasca']);
 });

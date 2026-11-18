@@ -176,6 +176,13 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
 .hud-boss { flex-basis: 100%; display: flex; align-items: center; justify-content: center; gap: .5rem; }
 .hud-boss[hidden] { display: none; }
 .hud-boss progress { width: min(42vw, 18rem); accent-color: #bb3553; }
+.hud-abilities { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.ability-button { display: inline-flex; align-items: center; gap: .4rem; }
+.ability-button[aria-pressed=true] { background: #d0ebff; }
+.ability-timer {
+  display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%;
+  background: conic-gradient(#8dd4e9 var(--ready, 0%), #eef6fc 0); border: 1px solid var(--ink);
+}
 .ico-heart, .ico-coin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--ink); border-radius: 50%; }
 .ico-heart { background: var(--danger); border-radius: 50% 50% 50% 0; transform: rotate(-45deg) scale(.85); }
 .ico-coin { background: var(--gold); }
