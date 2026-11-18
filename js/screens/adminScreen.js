@@ -18,6 +18,7 @@ import { createFaceEditor } from '../ui/faceEditor.js';
 import { drawEskimo, eskimoCanvas, faceCanvas, itemCanvas } from '../render/faceRenderer.js';
 
 const state = { tab: 'eskimos', eskimos: null, enemies: null, phases: null, items: null, draft: null };
+const filters = new Map();
 
 const UNLOCK_TYPES = [['default', 'Inicial'], ['wins', 'Nº de vitórias'], ['rounds', 'Nº de rodadas vencidas'],
   ['phase', 'Completar fase'], ['fragments', 'Fragmentos de bioma']];
@@ -57,20 +58,52 @@ function entityTab(cfg) {
   const draft = isNew ? state.draft : clone(byId(all, state[cfg.key]) || all[0] || null);
   if (draft && !isNew) state[cfg.key] = draft.id;
 
-  const listNode = el('div', { class: 'admin-list' },
+  const newLabel = cfg.newAction ?? `Novo ${cfg.newLabel.toLowerCase()}`;
+  const rows = all.map((x) => ({
+    text: `${x.name} ${cfg.sub(x) ?? ''}`,
+    button: el('button', {
+      class: `admin-item ${!isNew && x.id === draft?.id ? 'active' : ''}`,
+      'aria-pressed': String(!isNew && x.id === draft?.id),
+      onclick: () => { state[cfg.key] = x.id; render(); },
+    }, el('span', { class: 'admin-item-art', 'aria-hidden': 'true' }, cfg.thumb(x)),
+    el('span', { class: 'admin-item-text' }, el('strong', { text: x.name }), el('small', { text: cfg.sub(x) }))),
+  }));
+  const filter = el('input', { class: 'admin-filter', type: 'search', 'aria-label': 'Buscar no catálogo',
+    placeholder: 'Buscar no catálogo', value: filters.get(cfg.key) ?? '' });
+  const empty = el('p', { class: 'admin-empty', role: 'status', hidden: true });
+  const normalize = (text) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  function updateList() {
+    const query = normalize(filter.value.trim());
+    let visible = 0;
+    for (const { button, text } of rows) {
+      button.hidden = !normalize(text).includes(query);
+      if (!button.hidden) visible++;
+    }
+    empty.hidden = visible > 0;
+    empty.textContent = all.length ? 'Nenhum resultado para esta busca.' : 'O catálogo está vazio.';
+  }
+  filter.addEventListener('input', () => { filters.set(cfg.key, filter.value); updateList(); });
+  updateList();
+
+  const listNode = el('aside', { class: 'admin-catalog', 'aria-label': 'Catálogo' },
+    el('div', { class: 'admin-catalog-heading' },
+      el('h2', { text: 'Catálogo' }), el('span', { class: 'admin-count', text: String(all.length) })),
     el('button', {
-      class: 'btn btn-primary btn-block', text: `+ ${cfg.newLabel}`,
+      class: 'btn btn-primary btn-block admin-create', text: `+ ${newLabel}`,
       onclick: () => { state[cfg.key] = '__new__'; state.draft = cfg.newEntity(); render(); },
     }),
-    all.map((x) => el('button', {
-      class: `admin-item ${!isNew && x.id === draft?.id ? 'active' : ''}`,
-      onclick: () => { state[cfg.key] = x.id; render(); },
-    }, cfg.thumb(x), el('div', {}, el('strong', { text: x.name }), el('small', { text: cfg.sub(x) })))));
+    all.length > 0 && filter,
+    el('div', { class: 'admin-list' }, rows.map(({ button }) => button), empty));
 
-  if (!draft) return el('div', { class: 'admin-layout' }, listNode, el('div', { class: 'card' }, el('p', { text: 'Nada cadastrado ainda.' })));
+  if (!draft) return el('div', { class: 'admin-layout' }, listNode,
+    el('div', { class: 'card admin-form' }, el('p', { text: 'Crie um registro para começar.' })));
 
   const form = cfg.buildForm(draft);
+  const saveButton = el('button', { class: 'btn btn-primary', text: 'Salvar', onclick: () => save() });
   const save = async () => {
+    if (saveButton.disabled) return;
+    saveButton.disabled = true;
+    saveButton.textContent = 'Salvando…';
     try {
       form.read(draft);
       if (!draft.name?.trim()) throw new Error('Informe um nome.');
@@ -84,6 +117,9 @@ function entityTab(cfg) {
       render();
     } catch (e) {
       toast(e.message, 'error', 4000);
+    } finally {
+      saveButton.disabled = false;
+      saveButton.textContent = 'Salvar';
     }
   };
   const del = async () => {
@@ -102,11 +138,12 @@ function entityTab(cfg) {
 
   return el('div', { class: 'admin-layout' }, listNode,
     el('div', { class: 'card admin-form' },
-      el('h2', { text: isNew ? `Novo: ${cfg.newLabel}` : draft.name }),
-      form.node,
-      el('div', { class: 'form-actions' },
-        el('button', { class: 'btn btn-danger', text: isNew ? 'Descartar' : 'Excluir', onclick: del }),
-        el('button', { class: 'btn btn-primary', text: 'Salvar', onclick: save }))));
+      el('header', { class: 'admin-editor-heading' },
+        el('h2', { text: isNew ? newLabel : draft.name }),
+        el('div', { class: 'admin-editor-actions' },
+          el('button', { class: 'btn admin-discard', text: isNew ? 'Descartar' : 'Excluir', onclick: del }),
+          saveButton)),
+      form.node));
 }
 
 // ---------- Aba 1: Esquimós ----------
@@ -591,11 +628,23 @@ function dataTab() {
 
 // ---------- Tela ----------
 let rootEl = null;
-const TABS = [['eskimos', 'Esquimós'], ['enemies', 'Inimigos'], ['phases', 'Fases & Rodadas'], ['items', 'Itens & Armas'],
-  ['raids', 'Raides'], ['abilities', 'Habilidades'], ['economy', 'Economia'], ['biomes', 'Biomas'],
-  ['elements', 'Elementos'], ['data', 'Dados']];
+const GROUPS = [
+  ['Conteúdo', [['eskimos', 'Esquimós'], ['enemies', 'Inimigos'], ['phases', 'Fases e rodadas'], ['raids', 'Raides'], ['biomes', 'Biomas']]],
+  ['Balanceamento', [['items', 'Itens e armas'], ['abilities', 'Habilidades'], ['economy', 'Economia'], ['elements', 'Elementos']]],
+  ['Configurações', [['data', 'Dados e backup']]],
+];
+const TITLES = Object.fromEntries(GROUPS.flatMap(([, links]) => links));
+
+function changeTab(tab) {
+  if (tab === state.tab) return;
+  state.tab = tab;
+  render();
+  rootEl?.querySelector('.admin-section-title')?.focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}
 
 function render() {
+  if (!rootEl) return;
   const content = {
     eskimos: () => entityTab({ key: 'eskimos', prefix: 'esq', newLabel: 'Esquimó', newEntity: newEskimo, thumb: (x) => eskimoCanvas(x, 40), sub: (x) => CLASSES[x.classId]?.name || x.classId, buildForm: eskimoForm }),
     enemies: () => entityTab({
@@ -604,7 +653,7 @@ function render() {
       buildForm: enemyForm, blockDelete: blockEnemyDelete,
     }),
     phases: () => entityTab({
-      key: 'phases', prefix: 'fase', newLabel: 'Fase', thumb: () => el('span', { class: 'phase-thumb' }), sub: (x) => `${x.rounds.length} rodadas`,
+      key: 'phases', prefix: 'fase', newLabel: 'Fase', newAction: 'Nova fase', thumb: () => el('span', { class: 'phase-thumb' }), sub: (x) => `${x.rounds.length} rodadas`,
       newEntity: () => ({ id: '', name: '', mapId: getData().maps[0]?.id, startGold: 650, lives: 100, rounds: [{ groups: [{ enemyId: getData().enemies[0]?.id, count: 10, interval: 0.8, delay: 0 }] }] }),
       buildForm: phaseForm,
       blockDelete: (p, d) => (d.eskimos.some((e) => e.unlock?.type === 'phase' && e.unlock.value === p.id) ? 'Algum esquimó é desbloqueado por essa fase.' : null),
@@ -615,7 +664,7 @@ function render() {
       buildForm: itemForm,
     }),
     raids: () => entityTab({
-      key: 'raids', prefix: 'raide', newLabel: 'Raide', thumb: () => el('span', { class: 'phase-thumb' }),
+      key: 'raids', prefix: 'raide', newLabel: 'Raide', newAction: 'Nova raide', thumb: () => el('span', { class: 'phase-thumb' }),
       sub: (raid) => `${raid.farmRounds.length} rodadas de farm`, buildForm: raidForm,
       newEntity: () => {
         const data = getData();
@@ -631,7 +680,7 @@ function render() {
       },
     }),
     abilities: () => entityTab({
-      key: 'abilities', prefix: 'habilidade', newLabel: 'Habilidade', thumb: () => el('span', { class: 'phase-thumb' }),
+      key: 'abilities', prefix: 'habilidade', newLabel: 'Habilidade', newAction: 'Nova habilidade', thumb: () => el('span', { class: 'phase-thumb' }),
       sub: (ability) => ABILITY_TYPES[ability.type]?.name, buildForm: abilityForm,
       newEntity: () => ({ id: '', name: '', type: 'chuva_flechas' }),
       blockDelete: (ability, data) => data.items.some((item) => item.abilityId === ability.id) ?
@@ -648,18 +697,33 @@ function render() {
     data: dataTab,
   }[state.tab]();
 
-  rootEl.replaceChildren(el('div', { class: 'screen screen-admin' },
-    el('header', { class: 'topbar' },
-      el('h1', { class: 'logo logo-small' }, 'Painel ', el('span', { text: 'Admin' })),
-      el('div', { class: 'spacer' }),
-      el('button', { class: 'btn btn-small', text: 'Ir para o jogo', onclick: () => go(isOnline() ? 'menu' : 'login') }),
-      el('button', { class: 'btn btn-small btn-danger', text: 'Sair do admin', onclick: async () => {
-        try { await adminLogout(); go('login'); } catch (error) { toast(error.message, 'error'); }
-      } })),
-    el('nav', { class: 'tabs tabs-scroll' }, TABS.map(([id, label]) => el('button', {
-      class: `tab ${state.tab === id ? 'active' : ''}`, text: label, onclick: () => { state.tab = id; render(); },
-    }))),
-    content));
+  const mode = isOnline() ? 'Servidor online' : 'Neste navegador';
+  rootEl.replaceChildren(el('div', { class: 'screen-admin admin-workshop' },
+    el('header', { class: 'admin-top' },
+      el('div', { class: 'admin-brand' },
+        el('strong', {}, 'Esquimó ', el('span', { text: 'TD' })),
+        el('span', { class: 'admin-brand-section', text: 'Painel Admin' })),
+      el('div', { class: 'admin-top-actions' },
+        el('button', { class: 'btn', text: 'Voltar ao jogo', onclick: () => go(isOnline() ? 'menu' : 'login') }),
+        el('button', { class: 'btn admin-discard', text: 'Sair do admin', onclick: async () => {
+          try { await adminLogout(); go('login'); } catch (error) { toast(error.message, 'error'); }
+        } }))),
+    el('div', { class: 'admin-workspace' },
+      el('nav', { class: 'admin-nav', 'aria-label': 'Seções do painel' },
+        GROUPS.map(([name, links]) => el('div', { class: 'admin-nav-group' }, el('h2', { text: name }),
+          links.map(([id, label]) => el('button', {
+            class: 'admin-nav-button', text: label, 'aria-current': state.tab === id ? 'page' : null,
+            onclick: () => changeTab(id),
+          })) ))),
+      el('main', { class: 'admin-main' },
+        el('label', { class: 'field admin-mobile-nav' }, el('span', { text: 'Seção do painel' }),
+          el('select', { value: state.tab, onchange: (event) => changeTab(event.target.value) },
+            GROUPS.map(([name, links]) => el('optgroup', { label: name },
+              links.map(([id, label]) => el('option', { value: id, text: label })))))),
+        el('header', { class: 'admin-banner' },
+          el('span', { class: 'admin-mode', text: mode }),
+          el('h1', { class: 'admin-section-title', tabindex: '-1', text: TITLES[state.tab] })),
+        content))));
 }
 
 export function adminScreen(root) {

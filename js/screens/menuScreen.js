@@ -20,6 +20,7 @@ import { DAMAGE_LABELS, ELEMENT_LABELS, damageMultiplier } from '../game/element
 import { ENEMY_TRAITS } from '../game/enemies.js';
 import { preferencesButton } from '../core/preferences.js';
 import { accountAction, cacheAccount, currentContentHash, isOnline, requestAPI, subscribeOnline } from '../core/online.js';
+import { multiplayerNotice } from './multiplayerScreen.js';
 
 const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
@@ -58,12 +59,13 @@ export function menuScreen(root, params = {}) {
   }) : null;
 
   const tabBtns = [['fases', 'Fases'], ['quartel', 'Quartel'], ['inventario', 'Inventário'], ['bestiario', 'Bestiário'],
-    ...(online ? [['online', 'Online']] : [])].map(([id, label]) =>
+    ['online', 'Multiplayer']].map(([id, label]) =>
     el('button', { class: 'tab', text: label, 'data-tab': id, onclick: () => { tab = id; render(); } }));
 
   function render() {
     tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-    const view = { fases: phasesView, quartel: barracksView, inventario: inventoryView, bestiario: bestiaryView, online: onlineView };
+    const view = { fases: phasesView, quartel: barracksView, inventario: inventoryView, bestiario: bestiaryView,
+      online: online ? onlineView : multiplayerNotice };
     content.replaceChildren((view[tab] ?? phasesView)());
   }
 

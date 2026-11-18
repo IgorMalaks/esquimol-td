@@ -39,12 +39,12 @@ npm run start:server
 # http://127.0.0.1:5173
 ```
 
-O Node serve a interface, a API e o WebSocket na mesma origem. Cadastre uma conta e abra a aba **Online**. Para testar duas contas na mesma máquina, use `http://127.0.0.1:5173` e `http://localhost:5173` ou perfis diferentes do navegador.
+O Node serve a interface, a API e o WebSocket na mesma origem. Cadastre uma conta e abra a aba **Multiplayer**. Para testar duas contas na mesma máquina, use `http://127.0.0.1:5173` e `http://localhost:5173` ou perfis diferentes do navegador.
 
 - O banco JSON padrão fica em `var/esquimo.json`. Use `ETD_DATA_FILE` para apontar a um volume persistente. Execute uma instância do Node por arquivo.
 - O servidor cria uma cópia diária e mantém até sete em `backups/`, ao lado do arquivo. Para testar uma restauração, execute `node server/admin-cli.js restore <cópia> <novo-arquivo>`.
 - Para promover o primeiro administrador, pare a instância e execute `node server/admin-cli.js promote <usuário>` com o mesmo `ETD_DATA_FILE`.
-- Para produção online, hospede o Node num serviço com volume persistente e WebSocket. Configure `ETD_ORIGIN` com a URL pública HTTPS e encaminhe o WebSocket `/ws` pelo proxy. `ETD_PORT` e `ETD_HOST` configuram a escuta. O bind padrão é local. As Vercel Functions não hospedam o servidor WebSocket.
+- Para publicar o servidor com o banco JSON, use um serviço Node com volume persistente. Configure `ETD_ORIGIN` com a URL pública HTTPS e encaminhe `/ws` pelo proxy. `ETD_PORT` e `ETD_HOST` configuram a escuta. O bind padrão é local. Em [Vercel Functions](https://vercel.com/changelog/websocket-support-is-now-generally-available), conexões podem cair em instâncias diferentes. Essa arquitetura precisa de armazenamento e eventos compartilhados para salas e contas.
 
 O formato está em [Modelo de dados](docs/DATA-MODEL.md). O [roadmap](docs/ROADMAP.md) registra a validação restante.
 

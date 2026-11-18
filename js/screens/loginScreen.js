@@ -21,7 +21,7 @@ async function withBusy(btn, fn) {
   try { await fn(); } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; }
 }
 
-export function loginScreen(root) {
+export function loginScreen(root, { tab } = {}) {
   let mode = 'login';
   const user = el('input', { name: 'username', autocomplete: 'username', required: true, maxlength: 20, placeholder: 'seu_nome' });
   const pass = el('input', { type: 'password', name: 'password', autocomplete: 'current-password', required: true, placeholder: '••••••' });
@@ -53,7 +53,7 @@ export function loginScreen(root) {
         } else {
           await login(user.value, pass.value);
         }
-        go('menu');
+        go('menu', { tab });
       });
     },
   },
@@ -64,7 +64,10 @@ export function loginScreen(root) {
   submit);
 
   root.append(el('main', { class: 'screen screen-auth' },
-    hero(), form, preferencesButton(),
+    hero(), form,
+    el('div', { class: 'auth-game-actions' },
+      !isOnline() && el('a', { class: 'btn btn-small', href: '?modo=coop', text: 'Multiplayer' }),
+      preferencesButton()),
     el('a', { href: '#', class: 'admin-link', text: 'Painel Admin', onclick: (e) => { e.preventDefault(); go('adminLogin'); } })));
   user.focus();
 }
@@ -80,7 +83,7 @@ export function adminLoginScreen(root) {
   const pass2 = el('input', { type: 'password', autocomplete: 'new-password', required: setup });
   const submit = el('button', { type: 'submit', class: 'btn btn-primary btn-big', text: setup ? 'Criar senha de admin' : 'Entrar' });
 
-  root.append(el('main', { class: 'screen screen-auth' },
+  root.append(el('main', { class: 'screen screen-auth admin-auth' },
     el('form', {
       class: 'card auth-card',
       onsubmit: (e) => {

@@ -19,8 +19,8 @@ import { advanceTrades, affectedTrades, cancelTradesFor, changeTrade, reservedIt
 import { roomHub } from './rooms.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
-const ASSET = /^\/(?:index\.html|(?:js|css|preview)\/(?:[\w-]+\/)*[\w.-]+\.(?:html|js|css))$/;
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' };
+const ASSET = /^\/(?:index\.html|(?:js|css|preview)\/(?:[\w-]+\/)*[\w.-]+\.(?:html|js|css)|assets\/[\w-]+\.jpg)$/;
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg' };
 const freshProgress = () => ({
   version: 2, unlocked: [], eskimos: {}, inventory: [], phases: {}, stats: { wins: 0, losses: 0, roundsTotal: 0 },
   fragments: {}, raidKeys: 0, legendaryPity: 0, activeAbilities: [null, null],

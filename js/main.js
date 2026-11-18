@@ -8,12 +8,14 @@ import { loginScreen, adminLoginScreen } from './screens/loginScreen.js';
 import { menuScreen } from './screens/menuScreen.js';
 import { gameScreen } from './screens/gameScreen.js';
 import { adminScreen } from './screens/adminScreen.js';
+import { multiplayerScreen } from './screens/multiplayerScreen.js';
 
 registerScreen('login', loginScreen);
 registerScreen('adminLogin', adminLoginScreen);
 registerScreen('admin', adminScreen);
 registerScreen('menu', menuScreen);
 registerScreen('game', gameScreen);
+registerScreen('multiplayer', multiplayerScreen);
 
 applyPreferences();
 try {
@@ -38,7 +40,9 @@ try {
       }
     });
   } else getData();
-  go(currentAccount() ? 'menu' : 'login');
+  const wantsCoop = new URLSearchParams(location.search).get('modo') === 'coop';
+  if (wantsCoop && !isOnline()) go('multiplayer');
+  else go(currentAccount() ? 'menu' : 'login', wantsCoop ? { tab: 'online' } : {});
 } catch (error) {
   document.getElementById('app').append(el('main', { class: 'card' },
     el('h1', { text: 'Não foi possível abrir o jogo' }), el('p', { text: error.message }),

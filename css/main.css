@@ -118,6 +118,22 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
 .auth-card .tabs { margin: 0; }
 .auth-card .tab { flex: 1; border-radius: 12px; }
 .admin-link { color: var(--ink-soft); font-size: .8rem; text-decoration: underline; opacity: .7; margin-top: 1rem; }
+.auth-game-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .55rem; }
+.auth-game-actions a, .multiplayer-card a, .screen-auth > a.btn { text-decoration: none; }
+.multiplayer-card { overflow: hidden; width: 100%; max-width: 680px; padding: 0; }
+.multiplayer-banner {
+  padding: 1.25rem;
+  color: #f0f9ff;
+  background-color: #102b48;
+  background-image: linear-gradient(90deg, #0a1d30, #102a4340), url('../assets/admin-tundra.jpg');
+  background-position: center, center 53%;
+  background-size: cover;
+}
+.multiplayer-banner h2 { margin: 0; font: 900 clamp(1.9rem, 5vw, 2.65rem) / 1 var(--font-display); }
+.multiplayer-banner p { margin: .4rem 0 0; }
+.multiplayer-card-body { padding: 1.2rem; }
+.multiplayer-card-body p:first-child { margin-top: 0; }
+.multiplayer-card-body a { display: inline-flex; align-items: center; }
 
 /* ====== Topbar / menu ====== */
 .screen-menu, .screen-admin { max-width: 1200px; margin: 0 auto; padding: .8rem 1rem calc(2rem + var(--safe-b)); }
