@@ -71,7 +71,7 @@ A arena, o modo Infinito e as raides estão disponíveis com progresso local. Tu
 | [x] T2.8 | **Backup e restauração** do arquivo de dados do servidor: cópia diária com rotação (7), script de restaurar testado, checagem de integridade ao subir. | ADR-011 | T2.1 |
 | [~] T2.6 | **Ranking do Infinito entre amigos** (solo e coop separados). | SPEC-013 | T2.4 |
 
-O modo online roda localmente. Cadastro, sessão, amizades, presença e partida com progresso no servidor foram validados. Os testes do servidor cobrem persistência, restauração, regras de troca e exclusão de conta. A publicação online aguarda um serviço Node com volume persistente e WebSocket. A integração da importação e da janela de troca ainda precisa de uma validação completa no navegador, assim como a revisão de privacidade antes da publicação.
+O modo online está publicado na Vercel com Redis persistente e WebSocket. Em produção, foram validados cadastro, sessão, amizades, lobby e gravação do resultado para duas contas. Os testes locais cobrem persistência, restauração, regras de troca e exclusão de conta. A importação e a janela de troca ainda precisam de validação completa no navegador. A revisão de privacidade continua pendente.
 
 ## F3 — Coop em tempo real
 
@@ -84,7 +84,7 @@ O modo online roda localmente. Cadastro, sessão, amizades, presença e partida 
 | [~] T3.5 | Reconexão (60 s) e fim limpo quando o dono sai. | SPEC-016 | T3.2 |
 | [~] T3.6 | **Teste automatizado do coop:** script com 2 navegadores (dono + convidado) que joga a fase 1 e compara vidas, ouro e torres; roda a cada mudança no motor. | SPEC-016 | T3.2 |
 
-A fase 1 foi concluída em duas sessões de navegador e a reconexão preservou a torre e o ouro do convidado. O teste automatizado compara snapshots e a vitória de duas instâncias do motor. Faltam automatizar as duas sessões reais e validar partidas completas nos demais modos.
+A fase 1 foi concluída em duas sessões locais de navegador e a reconexão preservou a torre e o ouro do convidado. Em produção, duas sessões WebSocket validaram o convite, o comando de posicionamento, a sincronização da torre e a persistência do resultado. O teste automatizado compara snapshots e a vitória de duas instâncias do motor. Faltam automatizar as duas sessões reais de navegador e validar partidas completas nos demais modos.
 
 ---
 

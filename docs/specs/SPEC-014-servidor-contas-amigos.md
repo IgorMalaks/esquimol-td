@@ -1,6 +1,6 @@
 # SPEC-014 — Servidor, contas e amigos
 
-**Status:** disponível no servidor local, validação e hospedagem em andamento · **ADRs:** 011, 013
+**Status:** disponível no servidor local e na Vercel. Cadastro, sessão e amizades validados em produção · **ADRs:** 011, 013
 
 ## Estrutura
 ```

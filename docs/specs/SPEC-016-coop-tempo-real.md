@@ -1,6 +1,6 @@
 # SPEC-016 — Coop em tempo real
 
-**Status:** fase 1 validada em duas sessões locais, validação dos demais modos em andamento · **ADRs:** 012, 013
+**Status:** fase 1 concluída em duas sessões locais. Lobby, comandos e persistência do resultado validados na Vercel. As partidas completas nos demais modos seguem em validação · **ADRs:** 012, 013
 
 ## Salas
 - **R1** Dono cria a sala, escolhe modo (Fase, Raide, Infinito) e convida amigos online. Até **4** jogadores.
