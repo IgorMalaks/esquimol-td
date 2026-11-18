@@ -1,6 +1,6 @@
 # SPEC-015 — Trade de itens entre amigos
 
-**Status:** planejado (T2.5) · **ADR:** 013
+**Status:** servidor e interface local implementados, validação em andamento (T2.5) · **ADR:** 013
 
 ## Fluxo (janela ao vivo, os dois online)
 1. A convida B (só amigos). B aceita → abre a janela de trade para os dois.

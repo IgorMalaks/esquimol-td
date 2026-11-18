@@ -1,6 +1,6 @@
 # ADR-013 — Loot, garantia, fusão e chaves decididos no servidor
 
-**Status:** aceito (implementação pendente) · **Data:** 2026-11-17
+**Status:** implementado no servidor local · **Data:** 2026-11-17
 
 ## Contexto
 Com trade, um item falsificado vira prejuízo para todos. No cliente, qualquer valor (drop, chance de fusão, contador de garantia) pode ser editado.

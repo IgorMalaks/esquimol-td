@@ -1,9 +1,10 @@
 import { el, toast } from '../core/utils.js';
 import { go } from '../core/router.js';
-import { login, register, adminConfigured, adminSetup, adminLogin } from '../core/auth.js';
+import { login, register, adminConfigured, adminSetup, adminLogin, isAdminSession } from '../core/auth.js';
 import { getData } from '../data/gameData.js';
 import { eskimoCanvas, faceCanvas } from '../render/faceRenderer.js';
 import { preferencesButton } from '../core/preferences.js';
+import { isOnline } from '../core/online.js';
 
 function hero() {
   const data = getData();
@@ -69,6 +70,11 @@ export function loginScreen(root) {
 }
 
 export function adminLoginScreen(root) {
+  if (isOnline()) {
+    if (isAdminSession()) go('admin');
+    else { go('login'); toast('Entre com uma conta promovida a administrador.', 'info'); }
+    return;
+  }
   const setup = !adminConfigured();
   const pass = el('input', { type: 'password', autocomplete: setup ? 'new-password' : 'current-password', required: true });
   const pass2 = el('input', { type: 'password', autocomplete: 'new-password', required: setup });

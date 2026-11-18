@@ -4,7 +4,7 @@ Conteúdo e progresso têm versões independentes. Ambos estão no esquema 2 e u
 
 ## Conteúdo
 
-O objeto exportado pelo painel tem `version`, `eskimos`, `enemies`, `items`, `maps`, `phases`, `abilities`, `raids` e `biomes`. As últimas três coleções começam vazias até suas funcionalidades entrarem no jogo.
+O objeto exportado pelo painel tem `version`, `eskimos`, `enemies`, `items`, `maps`, `phases`, `abilities`, `raids` e `biomes`. Pode incluir `economy` para personalizar pesos, garantias, fusão e fragmentos, e `elements` com a matriz de multiplicadores.
 
 | Registro | Campos |
 |---|---|
@@ -36,5 +36,14 @@ O objeto exportado pelo painel tem `version`, `eskimos`, `enemies`, `items`, `ma
 | `fragments` | ID do bioma → saldo inteiro. |
 | `raidKeys` | Saldo inteiro de chaves compartilhado entre raides. |
 | `legendaryPity` | Chefes elegíveis consecutivos sem Lendário ou Mítico. |
+| `activeAbilities` | Dois UIDs de itens de habilidade equipados ou nulos. |
+| `endlessBest`, `endlessByBiome` | Melhor wave solo geral e por bioma. O servidor também mantém `endlessCoopBest` e `endlessCoopByBiome`. |
+| `discoveredEnemies` | IDs de inimigos encontrados no bestiário. |
+
+## Servidor
+
+`var/esquimo.json` tem o esquema de armazenamento 1, separado do esquema de conteúdo e do progresso. Inclui contas, sessões, conteúdo editado, ofertas de troca e histórico. O servidor persiste credenciais scrypt com salt. A chave de sessão armazenada é o hash SHA-256 do token no cookie. As salas vivem em memória. Ofertas e inventários mudam numa transação única. A exclusão de conta anonimiza o participante no histórico compartilhado.
+
+A exportação do progresso solo contém somente o nome do usuário e o progresso. Na importação online, o servidor atribui novos identificadores aos itens e grava `origin: 'local'`. Esses itens não entram em trocas.
 
 O repositório aplica migrações sequenciais antes de salvar uma atualização. Backups antigos sem `version` são tratados como versão 1. Conteúdo de versão futura fica preservado no armazenamento e pode ser substituído pelo painel após confirmação explícita de importação ou restauração.

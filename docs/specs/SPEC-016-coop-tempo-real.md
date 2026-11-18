@@ -1,6 +1,6 @@
 # SPEC-016 — Coop em tempo real
 
-**Status:** planejado (T3.1–T3.5) · **ADRs:** 012, 013
+**Status:** fase 1 validada em duas sessões locais, validação dos demais modos em andamento · **ADRs:** 012, 013
 
 ## Salas
 - **R1** Dono cria a sala, escolhe modo (Fase, Raide, Infinito) e convida amigos online. Até **4** jogadores.

@@ -6,8 +6,12 @@ import { hasTrait } from '../game/enemies.js';
 import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
 import { DEFAULT_ECONOMY, economy } from '../game/economy.js';
 import { validateMatrix } from '../game/elements.js';
+import { isOnline, requestAPI, setContentHash } from '../core/online.js';
 
 let cache = null;
+export function useServerContent(data) {
+  cache = prepareData(data);
+}
 
 export function getData() {
   if (!cache) {
@@ -94,6 +98,10 @@ export function prepareData(data) {
 }
 
 export function saveData(data, { replace = false } = {}) {
+  if (isOnline()) {
+    return requestAPI('/admin/content', { method: 'PUT', body: prepareData(data) })
+      .then(({ content, hash }) => { useServerContent(content); setContentHash(hash); });
+  }
   const saved = storage.get('gamedata');
   if (!replace && saved !== null) prepareData(saved);
   const next = prepareData(data);
@@ -102,7 +110,8 @@ export function saveData(data, { replace = false } = {}) {
 }
 
 export function resetData() {
-  saveData(createDefaultData(), { replace: true });
+  const result = saveData(createDefaultData(), { replace: true });
+  if (result?.then) return result.then(() => cache);
   return cache;
 }
 

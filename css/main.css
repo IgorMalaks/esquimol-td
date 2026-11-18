@@ -183,6 +183,7 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
   padding: .3rem .7rem; background: var(--surface-3); border-bottom: 1px solid var(--frost-300);
 }
 .tutorial-guide[hidden] { display: none; }
+.trade-items { display: grid; gap: .35rem; max-height: 14rem; overflow-y: auto; margin: .5rem 0; }
 .ability-button { display: inline-flex; align-items: center; gap: .4rem; }
 .ability-button[aria-pressed=true] { background: #d0ebff; }
 .ability-timer {

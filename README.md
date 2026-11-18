@@ -1,8 +1,8 @@
 # Esquimó TD
 
-Esqueleto funcional de um Tower Defense de navegador inspirado em Bloons TD: esquimós no lugar de macacos, "carinhas" em camadas no lugar de balões, com progressão (árvore de habilidades, XP, desbloqueios), drops clicáveis e Painel Admin com criador visual de rostos.
+Tower defense de navegador com personagens originais, inimigos em camadas, progressão, equipamentos e um Painel Admin com criador visual de rostos.
 
-Roda 100% no navegador, sem build e sem dependências. PC (mouse) e celular (toque/arraste).
+O modo solo funciona no navegador sem build ou dependências. O modo online usa um servidor Node com contas, amizades, trocas e partidas cooperativas.
 
 ## Como rodar
 
@@ -24,12 +24,29 @@ Modo QA: execute `localStorage.setItem('etd.dev', '1')` no navegador de teste e 
 
 ```bash
 npm test   # Node 22+, sem dependências
+npm run test:server   # Usa uma porta de teste em 127.0.0.1
 node tools/sim-economia.mjs 1000 esquimo-td
 ```
 
 ## Publicação
 
-Importe o repositório na Vercel. O `vercel.json` configura o jogo como site estático sem build. As contas, os dados do Painel Admin e o progresso nesta etapa ficam no armazenamento do navegador, por domínio. O formato está em [Modelo de dados](docs/DATA-MODEL.md).
+Importe o repositório na Vercel. O `vercel.json` configura o modo solo como site estático sem build. As contas, o conteúdo editado e o progresso solo ficam no navegador, por domínio. Use **Exportar progresso** para gerar um arquivo que a conta online com o mesmo nome possa importar uma vez.
+
+## Servidor online
+
+```bash
+npm run start:server
+# http://127.0.0.1:5173
+```
+
+O Node serve a interface, a API e o WebSocket na mesma origem. Cadastre uma conta e abra a aba **Online**. Para testar duas contas na mesma máquina, use `http://127.0.0.1:5173` e `http://localhost:5173` ou perfis diferentes do navegador.
+
+- O banco JSON padrão fica em `var/esquimo.json`. Use `ETD_DATA_FILE` para apontar a um volume persistente. Execute uma instância do Node por arquivo.
+- O servidor cria uma cópia diária e mantém até sete em `backups/`, ao lado do arquivo. Para testar uma restauração, execute `node server/admin-cli.js restore <cópia> <novo-arquivo>`.
+- Para promover o primeiro administrador, pare a instância e execute `node server/admin-cli.js promote <usuário>` com o mesmo `ETD_DATA_FILE`.
+- Para produção online, hospede o Node num serviço com volume persistente e WebSocket. Configure `ETD_ORIGIN` com a URL pública HTTPS e encaminhe o WebSocket `/ws` pelo proxy. `ETD_PORT` e `ETD_HOST` configuram a escuta. O bind padrão é local. As Vercel Functions não hospedam o servidor WebSocket.
+
+O formato está em [Modelo de dados](docs/DATA-MODEL.md). O [roadmap](docs/ROADMAP.md) registra a validação restante.
 
 ## Estrutura
 

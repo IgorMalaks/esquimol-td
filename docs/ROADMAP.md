@@ -62,25 +62,29 @@ A arena, o modo Infinito e as raides estão disponíveis com progresso local. Tu
 
 | ID | Tarefa | Spec / ADR | Depende de |
 |---|---|---|---|
-| [ ] T2.1 | Servidor Node sem dependências (HTTP + WebSocket), armazenamento JSON com escrita atômica, sessões. | SPEC-014, ADR-011 | F1 |
-| [ ] T2.2 | Contas e progresso no servidor; importação única da conta local (itens importados ficam **não negociáveis**). Admin vira papel da conta. | SPEC-014 | T2.1 |
-| [ ] T2.3 | **Loot, garantia, fusão e chaves autoritativos no servidor.** | ADR-013 | T2.2 |
-| [ ] T2.4 | Amigos (pedido, aceite, remover, presença online). | SPEC-014 | T2.2 |
-| [ ] T2.5 | **Trade** entre amigos (janela ao vivo, confirmação dupla, execução atômica, auditoria). | SPEC-015 | T2.3, T2.4 |
-| [ ] T2.7 | **Privacidade:** apagar conta (e o que acontece com trades no histórico), exportar meus dados, filtro de nomes ofensivos, termos simples. Revisar LGPD antes de qualquer uso público. | SPEC-014 | T2.2 |
-| [ ] T2.8 | **Backup e restauração** do arquivo de dados do servidor: cópia diária com rotação (7), script de restaurar testado, checagem de integridade ao subir. | ADR-011 | T2.1 |
-| [ ] T2.6 | **Ranking do Infinito entre amigos** (solo e coop separados). | SPEC-013 | T2.4 |
+| [x] T2.1 | Servidor Node sem dependências (HTTP + WebSocket), armazenamento JSON com escrita atômica, sessões. | SPEC-014, ADR-011 | F1 |
+| [~] T2.2 | Contas e progresso no servidor; importação única da conta local (itens importados ficam **não negociáveis**). Admin vira papel da conta. | SPEC-014 | T2.1 |
+| [x] T2.3 | **Loot, garantia, fusão e chaves autoritativos no servidor.** | ADR-013 | T2.2 |
+| [x] T2.4 | Amigos (pedido, aceite, remover, presença online). | SPEC-014 | T2.2 |
+| [~] T2.5 | **Trade** entre amigos (janela ao vivo, confirmação dupla, execução atômica, auditoria). | SPEC-015 | T2.3, T2.4 |
+| [~] T2.7 | **Privacidade:** apagar conta (e o que acontece com trades no histórico), exportar meus dados, filtro de nomes ofensivos, termos simples. Revisar LGPD antes de qualquer uso público. | SPEC-014 | T2.2 |
+| [x] T2.8 | **Backup e restauração** do arquivo de dados do servidor: cópia diária com rotação (7), script de restaurar testado, checagem de integridade ao subir. | ADR-011 | T2.1 |
+| [~] T2.6 | **Ranking do Infinito entre amigos** (solo e coop separados). | SPEC-013 | T2.4 |
+
+O modo online roda localmente. Cadastro, sessão, amizades, presença e partida com progresso no servidor foram validados. Os testes do servidor cobrem persistência, restauração, regras de troca e exclusão de conta. A publicação online aguarda um serviço Node com volume persistente e WebSocket. A integração da importação e da janela de troca ainda precisa de uma validação completa no navegador, assim como a revisão de privacidade antes da publicação.
 
 ## F3 — Coop em tempo real
 
 | ID | Tarefa | Spec / ADR | Depende de |
 |---|---|---|---|
-| [ ] T3.1 | Salas (até 4), convite de amigos, lobby com "pronto" e checagem de versão do conteúdo. | SPEC-016 | T2.4 |
-| [ ] T3.2 | Simulação no navegador do dono + relay pelo servidor; snapshots 15 Hz com interpolação; comandos dos convidados. | SPEC-016, ADR-012 | T3.1 |
-| [ ] T3.3 | Regras coop: ouro dividido igualmente, vidas compartilhadas, drops individuais, ping no mapa, habilidades por jogador. | SPEC-016 | T3.2 |
-| [ ] T3.4 | Coop em Fases, Raide (vida do chefe escala por jogador) e Infinito. | SPEC-012, 013, 016 | T3.3 |
-| [ ] T3.5 | Reconexão (60 s) e fim limpo quando o dono sai. | SPEC-016 | T3.2 |
-| [ ] T3.6 | **Teste automatizado do coop:** script com 2 navegadores (dono + convidado) que joga a fase 1 e compara vidas, ouro e torres; roda a cada mudança no motor. | SPEC-016 | T3.2 |
+| [x] T3.1 | Salas (até 4), convite de amigos, lobby com "pronto" e checagem de versão do conteúdo. | SPEC-016 | T2.4 |
+| [x] T3.2 | Simulação no navegador do dono + relay pelo servidor; snapshots 15 Hz com interpolação; comandos dos convidados. | SPEC-016, ADR-012 | T3.1 |
+| [~] T3.3 | Regras coop: ouro dividido igualmente, vidas compartilhadas, drops individuais, ping no mapa, habilidades por jogador. | SPEC-016 | T3.2 |
+| [~] T3.4 | Coop em Fases, Raide (vida do chefe escala por jogador) e Infinito. | SPEC-012, 013, 016 | T3.3 |
+| [~] T3.5 | Reconexão (60 s) e fim limpo quando o dono sai. | SPEC-016 | T3.2 |
+| [~] T3.6 | **Teste automatizado do coop:** script com 2 navegadores (dono + convidado) que joga a fase 1 e compara vidas, ouro e torres; roda a cada mudança no motor. | SPEC-016 | T3.2 |
+
+A fase 1 foi concluída em duas sessões de navegador e a reconexão preservou a torre e o ouro do convidado. O teste automatizado compara snapshots e a vitória de duas instâncias do motor. Faltam automatizar as duas sessões reais e validar partidas completas nos demais modos.
 
 ---
 

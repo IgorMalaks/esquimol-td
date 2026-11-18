@@ -2,6 +2,7 @@
 // ATENÇÃO: tudo roda no cliente. PBKDF2 evita senha em texto puro no localStorage,
 // mas NÃO é controle de acesso real — quem tem o navegador tem os dados.
 import { storage } from './storage.js';
+import { cacheAccount, isOnline, onlineAccount, queueProfile, requestAPI } from './online.js';
 
 const ITERATIONS = 120000;
 const enc = new TextEncoder();
@@ -32,12 +33,14 @@ export function getAccount(username) {
 }
 
 export function saveAccount(acc) {
+  if (isOnline()) { queueProfile(acc); return; }
   const all = accounts();
   all[acc.username.toLowerCase()] = acc;
   storage.set('accounts', all);
 }
 
 export async function register(username, password) {
+  if (isOnline()) return cacheAccount(await requestAPI('/register', { method: 'POST', body: { username, password } }));
   requireCrypto();
   username = username.trim();
   if (!USERNAME_RE.test(username)) throw new Error('Usuário: 3 a 20 caracteres (letras, números, _ . -).');
@@ -51,6 +54,7 @@ export async function register(username, password) {
 }
 
 export async function login(username, password) {
+  if (isOnline()) return cacheAccount(await requestAPI('/login', { method: 'POST', body: { username, password } }));
   requireCrypto();
   const acc = getAccount(username.trim());
   const fail = new Error('Usuário ou senha inválidos.');
@@ -61,18 +65,20 @@ export async function login(username, password) {
 }
 
 export function currentAccount() {
+  if (isOnline()) return onlineAccount();
   const s = storage.get('session');
   return s ? getAccount(s.username) : null;
 }
 
 export function logout() {
+  if (isOnline()) return requestAPI('/logout', { method: 'POST' }).then(() => cacheAccount(null));
   storage.remove('session');
 }
 
 // ---------- Admin ----------
 export const adminConfigured = () => !!storage.get('admin');
-export const isAdminSession = () => sessionStorage.getItem(ADMIN_SESSION) === '1';
-export const adminLogout = () => sessionStorage.removeItem(ADMIN_SESSION);
+export const isAdminSession = () => isOnline() ? onlineAccount()?.role === 'admin' : sessionStorage.getItem(ADMIN_SESSION) === '1';
+export const adminLogout = () => isOnline() ? logout() : sessionStorage.removeItem(ADMIN_SESSION);
 
 export async function adminSetup(password) {
   requireCrypto();

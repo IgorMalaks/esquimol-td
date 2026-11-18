@@ -1,6 +1,6 @@
 # ADR-011 — Servidor Node sem dependências
 
-**Status:** aceito (implementação pendente) · **Data:** 2026-11-17
+**Status:** implementado e testado localmente · **Data:** 2026-11-17
 
 ## Contexto
 Multiplayer, amigos e trade exigem uma fonte da verdade fora do navegador. O projeto até aqui tem zero dependências (ADR-001) e a política interna exige versões fixas e cuidado com supply chain.

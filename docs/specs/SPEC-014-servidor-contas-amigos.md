@@ -1,6 +1,6 @@
 # SPEC-014 — Servidor, contas e amigos
 
-**Status:** planejado (T2.1, T2.2, T2.4) · **ADRs:** 011, 013
+**Status:** disponível no servidor local, validação e hospedagem em andamento · **ADRs:** 011, 013
 
 ## Estrutura
 ```

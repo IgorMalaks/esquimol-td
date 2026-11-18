@@ -1,6 +1,8 @@
 /docs/
 /tests/
 /tools/
+/server/
+/var/
 /README.md
 /LICENSE
 /.env

@@ -44,7 +44,7 @@ export class Game {
    * @param {{data, phase, map, roster: Array<{def, nodes, items}>, callbacks}} opts
    * callbacks: onHud(state), onSelect(tower|null), onToast(msg,type), onEnd(result)
    */
-  constructor(canvas, { data, phase, map, roster, abilities = [], callbacks }) {
+  constructor(canvas, { data, phase, map, roster, abilities = [], coop = null, callbacks }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.data = data;
@@ -55,19 +55,36 @@ export class Game {
     this.weatherTimer = 30;
     this.roster = roster;
     this.cb = callbacks;
+    this.coop = coop;
+    this.ownPlayer = coop?.room.me ?? 'local';
+    this.player = this.ownPlayer;
+    this.wallet = Object.fromEntries(Object.keys(coop?.teams ?? { local: true }).map((id) => [id, Number(phase.startGold)]));
+    this.activity = Object.fromEntries(Object.keys(this.wallet).map((id) => [id, { used: new Set(), collected: 0 }]));
+    this.isGuest = Boolean(coop && this.ownPlayer !== coop.room.owner);
+    this.snapshotAt = 0;
+    this.snapshotSeq = 0;
+    this.dropTurn = 0;
     this.path = new Path(map.points.map(([x, y]) => ({ x: x * WORLD.W, y: y * WORLD.H })));
     this.flightPath = map.flightPath?.length > 1
       ? new Path(map.flightPath.map(([x, y]) => ({ x: x * WORLD.W, y: y * WORLD.H })))
       : this.path;
     this.enemyDefs = new Map(data.enemies.map((e) => [e.id, e]));
     this.roundData = data;
+    if (coop && phase.raid) {
+      const boss = this.enemyDefs.get(phase.raid.bossId);
+      const boosted = { ...boss, hp: Math.ceil(boss.hp * (1 + 0.75 * (Object.keys(coop.teams).length - 1))) };
+      this.enemyDefs.set(boss.id, boosted);
+      this.roundData = { ...data, enemies: data.enemies.map((enemy) => enemy.id === boss.id ? boosted : enemy) };
+    }
     this.rbeMemo = Object.create(null);
-    this.canHitAir = roster.some((entry) => computeStats(entry.def, entry).hitsAir);
+    this.canHitAir = (coop ? Object.values(coop.teams).flatMap((team) => team.roster) : roster)
+      .some((entry) => computeStats(entry.def, entry).hitsAir);
     this.bossDrops = [];
     this.raidReward = null;
     this.seenEnemies = new Set();
     this.preparation = null;
-    this.abilities = abilities.map((ability) => ability && { ...ability, remaining: ability.cooldown / 2 });
+    this.abilityPool = Object.fromEntries(Object.keys(this.wallet).map((id) =>
+      [id, (coop?.teams[id]?.abilities ?? abilities).map((ability) => ability && { ...ability, remaining: ability.cooldown / 2 })]));
     this.abilityTarget = null;
     this.abilityBursts = [];
     this.goldBoost = null;
@@ -79,6 +96,7 @@ export class Game {
     this.roundTime = 0;
     this.spawnQueue = [];
     this.speed = 1;
+    this.paused = false;
     this.autoStart = false;
     this.over = false;
 
@@ -90,6 +108,7 @@ export class Game {
     this.drops = [];
     this.effects = [];
     this.loot = [];
+    this.collectedLoot = 0;
     this.used = new Set();
     this.seq = 0;
 
@@ -113,6 +132,15 @@ export class Game {
     this._raf = requestAnimationFrame(this._frame);
   }
 
+  get gold() { return this.wallet[this.player]; }
+  set gold(value) { this.wallet[this.player] = value; }
+  get abilities() { return this.abilityPool[this.player]; }
+
+  awardGold(amount) {
+    const players = Object.keys(this.wallet);
+    for (const id of players) this.wallet[id] += amount / players.length;
+  }
+
   destroy() {
     this._destroyed = true;
     cancelAnimationFrame(this._raf);
@@ -125,7 +153,8 @@ export class Game {
     if (this._destroyed) return;
     const dt = Math.min(0.25, (now - this._last) / 1000);
     this._last = now;
-    if (!this.over) {
+    if (this.isGuest) this._interpolateSnapshot(now);
+    else if (!this.over && !this.paused) {
       this._acc += dt * this.speed;
       let n = 0;
       while (this._acc >= STEP && n < MAX_STEPS_PER_FRAME) { this.update(STEP); this._acc -= STEP; n++; }
@@ -135,6 +164,10 @@ export class Game {
     for (const f of this.snow) { f.y += f.v * dt; f.x += Math.sin(this.time + f.y * 0.02) * 8 * dt; if (f.y > WORLD.H) f.y = -5; }
     this.render();
     this._emitHud();
+    if (this.coop && !this.isGuest && now - this.snapshotAt >= 1000 / 15) {
+      this.snapshotAt = now;
+      this.cb.onSnapshot?.(this.snapshot());
+    }
     this._raf = requestAnimationFrame(this._frame);
   };
 
@@ -184,7 +217,8 @@ export class Game {
 
   // ---------- Rodadas ----------
   startRound() {
-    if (this.roundActive || this.over || this.preparation !== null) return;
+    if (this.isGuest || this.roundActive || this.over || this.preparation !== null) return;
+    if (this.cb.canStartRound?.() === false) return;
     const r = this.nextRound();
     if (!r?.groups.length) return;
     if (this.phase.raid && !this.raidStarted) {
@@ -222,7 +256,7 @@ export class Game {
     this.round++;
     const bonus = (this.phase.endless ? endlessGold(this.round) : 100 + this.round) +
       this.towers.reduce((sum, tower) => sum + (tower.stats.roundGold ?? 0), 0);
-    this.gold += bonus;
+    this.awardGold(bonus);
     if (!this.phase.endless && this.round >= this.phase.rounds.length) { this.end(true); return; }
     if (this.phase.raid && this.round === this.phase.raid.farmRounds.length) {
       this.preparation = this.phase.raid.prepTime;
@@ -238,7 +272,12 @@ export class Game {
     this.over = true;
     this.roundActive = false;
     if (victory) {
-      for (const d of this.drops) if (d.type === 'chest') this.loot.push(...this._openChest(d.source));
+      for (const d of this.drops) if (d.type === 'chest') {
+        const contents = this._openChest(d.source);
+        this.loot.push(...contents);
+        if (d.owner && this.activity[d.owner]) this.activity[d.owner].collected += contents.length;
+        else this.collectedLoot += contents.length;
+      }
       this.drops = this.drops.filter((d) => d.type !== 'chest');
       if (this.raidReward) {
         this.loot.push(...this.raidReward);
@@ -252,6 +291,9 @@ export class Game {
       raid: this.phase.raid && this.raidStarted ? this.phase.raid.id : null,
       seenEnemies: [...this.seenEnemies],
       biome: this.biome?.id, layersPopped: this.layersPopped,
+      collectedLoot: this.collectedLoot,
+      players: Object.fromEntries(Object.entries(this.activity).map(([id, value]) =>
+        [id, { collected: value.collected, usedEskimos: [...value.used] }])),
     });
   }
 
@@ -292,7 +334,9 @@ export class Game {
       (exposed ? 1.2 : 1) * (1 - e.slowPct) * dt;
     if (e.dist >= e.path.length) {
       e.alive = false;
-      if (hasTrait(e.def, 'ladrao')) this.gold = Math.max(0, this.gold - Math.ceil(this.gold * 0.05));
+      if (hasTrait(e.def, 'ladrao')) {
+        for (const id of Object.keys(this.wallet)) this.wallet[id] = Math.max(0, this.wallet[id] - Math.ceil(this.wallet[id] * 0.05));
+      }
       this.lives -= rbe(e.def.id, this.roundData, this.rbeMemo);
       if (this.lives <= 0 || e.raidBoss) { this.lives = Math.max(0, this.lives); this.end(false); }
       return;
@@ -334,12 +378,13 @@ export class Game {
     this.layersPopped++;
     if (!this.practiceDrop && this.cb.needsPracticeDrop?.()) {
       this.practiceDrop = true;
-      this.drops.push({ id: ++this.seq, type: 'practice', x: e.x, y: e.y, t: 0, life: Infinity });
+      this.drops.push({ id: ++this.seq, type: 'practice', x: Math.min(WORLD.W - 24, e.x + 35),
+        y: Math.min(WORLD.H - 24, e.y + 24), t: 0, life: Infinity });
     }
     const raid = this.phase.raid;
     const inFarm = raid && this.round < raid.farmRounds.length;
     const boost = this.goldBoost?.until > this.simTime ? this.goldBoost.multiplier : 1;
-    this.gold += (Number(e.def.reward) || 0) * (inFarm ? raid.farmGoldMultiplier : 1) * boost;
+    this.awardGold((Number(e.def.reward) || 0) * (inFarm ? raid.farmGoldMultiplier : 1) * boost);
     if (p?.tower) p.tower.pops++;
     this.effects.push({ type: 'pop', x: e.x, y: e.y, r: e.r, color: e.def.face.skin, t: 0, dur: 0.3 });
     if (e.raidBoss || (this.phase.endless && hasTrait(e.def, 'chefe'))) {
@@ -385,8 +430,10 @@ export class Game {
     const chest = Math.random() < settings.chestChance;
     const ang = Math.random() * Math.PI * 2;
     const off = PATH_W * 0.7;
+    const players = Object.keys(this.wallet);
+    const owner = this.coop ? players[this.dropTurn++ % players.length] : null;
     this.drops.push({
-      id: ++this.seq, type: chest ? 'chest' : 'item', itemId: item.id, source,
+      id: ++this.seq, type: chest ? 'chest' : 'item', itemId: item.id, source, owner,
       x: Math.min(WORLD.W - 20, Math.max(20, e.x + Math.cos(ang) * off)),
       y: Math.min(WORLD.H - 20, Math.max(20, e.y + Math.sin(ang) * off)),
       t: 0, life: chest ? Infinity : ITEM_LIFETIME,
@@ -401,19 +448,24 @@ export class Game {
   }
 
   _collectDrop(d) {
+    if (this.isGuest) { this.cb.onCommand?.({ kind: 'drop', id: d.id }); return; }
     d.dead = true;
     this.cb.onAction?.('drop');
     if (d.type === 'practice') return;
     const ids = d.type === 'chest' ? this._openChest(d.source) : [d.itemId];
     this.loot.push(...ids);
+    if (d.owner) this.activity[d.owner].collected += ids.length;
+    else this.collectedLoot += ids.length;
     const names = ids.map((id) => this.data.items.find((i) => i.id === id)?.name).filter(Boolean).join(', ');
-    this.cb.onToast?.(d.type === 'chest' ? `Baú aberto: ${names}` : `Você pegou: ${names}`, 'loot');
+    const label = this.cb.serverLoot ? 'Drop coletado. O servidor sorteia no fim da partida.' :
+      d.type === 'chest' ? `Baú aberto: ${names}` : `Você pegou: ${names}`;
+    this.cb.onToast?.(label, 'loot');
     this.effects.push({ type: 'ring', x: d.x, y: d.y, r: 30, color: '#ffd32a', t: 0, dur: 0.4 });
   }
 
   // ---------- Torres ----------
   rosterEntry(id) {
-    return this.roster.find((r) => r.def.id === id);
+    return (this.coop?.teams[this.player]?.roster ?? this.roster).find((r) => r.def.id === id);
   }
 
   towerStats(t) {
@@ -439,6 +491,7 @@ export class Game {
   }
 
   canPlace(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
     if (x < TOWER_R || y < TOWER_R || x > WORLD.W - TOWER_R || y > WORLD.H - TOWER_R) return false;
     if (this.path.distanceTo(x, y) < PATH_W / 2 + TOWER_R - 4) return false;
     if (this.map.obstacles?.some(([ox, oy, radius]) => dist2(x, y, ox, oy) < (radius + TOWER_R) ** 2)) return false;
@@ -446,25 +499,29 @@ export class Game {
   }
 
   placeTower(id, x, y) {
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'place', id, x, y }) ?? false;
     const entry = this.rosterEntry(id);
     if (!entry) return false;
     const cost = Number(entry.def.cost);
     if (this.gold < cost) { this.cb.onToast?.('Ouro insuficiente.', 'error'); return false; }
     if (!this.canPlace(x, y)) { this.cb.onToast?.('Não dá pra posicionar aí.', 'error'); return false; }
     const t = {
-      uid: ++this.seq, def: entry.def, entry, x, y, cooldown: 0, angle: -Math.PI / 2,
+      uid: ++this.seq, def: entry.def, entry, x, y, owner: this.player, cooldown: 0, angle: -Math.PI / 2,
       targetMode: 'primeiro', upgrades: { dmg: 0, spd: 0, rng: 0 }, active: new Set(), invested: cost, pops: 0,
     };
     this.towers.push(t);
     this.refreshTowerStats();
     this.gold -= cost;
     this.used.add(entry.def.id);
+    this.activity[this.player].used.add(entry.def.id);
     this.cb.onAction?.('place');
     this.effects.push({ type: 'ring', x, y, r: 28, color: '#ffffff', t: 0, dur: 0.35 });
     return true;
   }
 
   upgrade(t, track) {
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'upgrade', tower: t.uid, track });
+    if (t.owner !== this.player) return false;
     const lvl = t.upgrades[track];
     if (lvl >= UPGRADE_TRACKS[track].max) return false;
     const cost = upgradeCost(t.def, track, lvl);
@@ -478,6 +535,8 @@ export class Game {
   }
 
   activateNode(t, nodeId) {
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'skill', tower: t.uid, id: nodeId });
+    if (t.owner !== this.player) return false;
     const node = t.entry.nodes.find((n) => n.id === nodeId);
     if (!node || t.active.has(nodeId)) return false;
     const cost = Number(node.gold) || 0;
@@ -490,10 +549,13 @@ export class Game {
   }
 
   sell(t) {
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'sell', tower: t.uid });
+    if (t.owner !== this.player) return false;
     this.gold += Math.floor(t.invested * SELL_RATIO);
     this.towers = this.towers.filter((x) => x !== t);
     this.refreshTowerStats();
-    this.select(null);
+    if (this.selected === t) this.select(null);
+    return true;
   }
 
   sellValue(t) {
@@ -501,7 +563,10 @@ export class Game {
   }
 
   cycleTarget(t) {
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'target', tower: t.uid });
+    if (t.owner !== this.player) return false;
     t.targetMode = TARGET_MODES[(TARGET_MODES.indexOf(t.targetMode) + 1) % TARGET_MODES.length];
+    return true;
   }
 
   _findTarget(t) {
@@ -696,22 +761,33 @@ export class Game {
       this.ghost = null;
       return;
     }
-    const drop = this.drops.find((d) => dist2(d.x, d.y - 10 / GROUND_TILT, x, y) <= DROP_HIT_R ** 2);
+    const drop = this.drops.find((d) => !d.dead && (!d.owner || d.owner === this.ownPlayer) &&
+      dist2(d.x, d.y - 10 / GROUND_TILT, x, y) <= DROP_HIT_R ** 2);
     if (drop) { this._collectDrop(drop); return; }
     if (this.placing) {
       if (this.placeTower(this.placing, x, y)) this.cancelPlacing();
       return;
     }
     const t = this.towers.filter((tw) =>
-      dist2(tw.x, tw.y - TOWER_R * 0.75 / GROUND_TILT, x, y) <= (TOWER_R + 6) ** 2
+      tw.owner === this.ownPlayer && dist2(tw.x, tw.y - TOWER_R * 0.75 / GROUND_TILT, x, y) <= (TOWER_R + 6) ** 2
     ).sort((a, b) => b.y - a.y)[0];
     this.select(t || null);
   }
 
   _bindInput() {
     const c = this.canvas;
+    let pressed = 0;
+    const down = () => { pressed = performance.now(); };
     const move = (e) => { if (!this.dragging) this.updateGhost(e.clientX, e.clientY); };
     const up = (e) => {
+      if (this.coop && !this.dragging && (e.button === 1 || (e.pointerType === 'touch' && performance.now() - pressed >= 600))) {
+        const w = this.clientToWorld(e.clientX, e.clientY);
+        if (w.inside) {
+          if (this.isGuest) this.cb.onCommand?.({ kind: 'ping', x: w.x, y: w.y });
+          else this.ping(w.x, w.y);
+        }
+        return;
+      }
       if (this.dragging || (e.pointerType === 'mouse' && e.button !== 0)) return;
       const w = this.clientToWorld(e.clientX, e.clientY);
       this.handleTap(w.x, w.y);
@@ -725,10 +801,15 @@ export class Game {
     };
     const key = (e) => {
       if (e.key === 'Escape') { this.abilityTarget = null; this.cancelPlacing(); this.select(null); }
-      else if (e.key === ' ' && e.target === document.body) { e.preventDefault(); this.startRound(); }
+      else if (e.key === ' ' && e.target === document.body) {
+        e.preventDefault();
+        if (this.cb.onStartRequest) this.cb.onStartRequest();
+        else this.startRound();
+      }
       else if (!e.repeat && ['q', 'e'].includes(e.key.toLowerCase())) this.selectAbility(e.key.toLowerCase() === 'q' ? 0 : 1);
     };
     c.addEventListener('pointermove', move);
+    c.addEventListener('pointerdown', down);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointerleave', leave);
     c.addEventListener('contextmenu', ctxMenu);
@@ -736,6 +817,7 @@ export class Game {
     window.addEventListener('pointerdown', outside);
     this._unbind = () => {
       c.removeEventListener('pointermove', move);
+      c.removeEventListener('pointerdown', down);
       c.removeEventListener('pointerup', up);
       c.removeEventListener('pointerleave', leave);
       c.removeEventListener('contextmenu', ctxMenu);
@@ -748,7 +830,7 @@ export class Game {
     const boss = this.enemies.find((enemy) => enemy.alive && hasTrait(enemy.def, 'chefe'));
     const s = {
       gold: Math.floor(this.gold), lives: this.lives, round: this.round, totalRounds: this.phase.rounds.length,
-      roundActive: this.roundActive, speed: this.speed, autoStart: this.autoStart, over: this.over,
+      roundActive: this.roundActive, speed: this.speed, autoStart: this.autoStart, over: this.over, paused: this.paused,
       boss: boss ? { name: boss.def.name, hp: Math.ceil(boss.hp), maxHp: boss.def.hp } : null,
       preparation: this.preparation === null ? null : Math.ceil(this.preparation),
       abilities: this.abilities.map((ability) => ability && Math.ceil(ability.remaining)),
@@ -772,6 +854,7 @@ export class Game {
   _useAbility(slot, x, y) {
     const ability = this.abilities[slot];
     if (!ability || ability.remaining > 0 || this.over) return;
+    if (this.isGuest) return this.cb.onCommand?.({ kind: 'ability', slot, x, y });
     ability.remaining = ability.cooldown;
     const mark = { type: 'ring', x, y, r: ability.area, color: '#609de7', t: 0, dur: 0.5 };
     switch (ability.type) {
@@ -813,12 +896,13 @@ export class Game {
         this.goldBoost = { until: this.simTime + ability.duration, multiplier: 1 + ability.power / 100 };
         break;
     }
+    return true;
   }
 
   _updateAbilities(dt) {
     const cooldownPct = this.towers.reduce((max, tower) => Math.max(max, tower.stats.cooldownPct ?? 0), 0) +
       (this.biome?.effect === 'aurora' ? 15 : 0);
-    for (const ability of this.abilities) {
+    for (const slots of Object.values(this.abilityPool)) for (const ability of slots) {
       if (ability) ability.remaining = Math.max(0, ability.remaining - dt / Math.max(0.1, 1 - cooldownPct / 100));
     }
     this.abilityBursts = this.abilityBursts.filter((burst) => {
@@ -827,6 +911,107 @@ export class Game {
         damageType: 'perfurante', hit: new Set() }, burst.x, burst.y);
       return false;
     });
+  }
+
+  ping(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > WORLD.W || y < 0 || y > WORLD.H) return false;
+    const colors = ['#376deb', '#c24d70', '#126b51', '#bd751e'];
+    const color = colors[Object.keys(this.wallet).indexOf(this.player)] ?? colors[0];
+    this.effects.push({ type: 'ring', x, y, r: 48, color, t: 0, dur: 1.1 });
+    return true;
+  }
+
+  remoteAction(player, action) {
+    if (this.over || this.isGuest || !Object.hasOwn(this.wallet, player)) return false;
+    this.player = player;
+    try {
+      const tower = this.towers.find((entry) => entry.uid === action.tower && entry.owner === player);
+      switch (action.kind) {
+        case 'place': return this.placeTower(action.id, action.x, action.y);
+        case 'upgrade': return Boolean(tower && Object.hasOwn(UPGRADE_TRACKS, action.track) && this.upgrade(tower, action.track));
+        case 'skill': return Boolean(tower && this.activateNode(tower, action.id));
+        case 'target': return Boolean(tower && this.cycleTarget(tower));
+        case 'sell': return Boolean(tower && this.sell(tower));
+        case 'ping': return this.ping(action.x, action.y);
+        case 'ability': {
+          if (!Number.isInteger(action.slot) || action.slot < 0 || action.slot > 1) return false;
+          const ability = this.abilities[action.slot];
+          if (ability?.target !== 'global' && (!Number.isFinite(action.x) || !Number.isFinite(action.y) ||
+              action.x < 0 || action.x > WORLD.W || action.y < 0 || action.y > WORLD.H)) return false;
+          return this._useAbility(action.slot, action.x, action.y);
+        }
+        case 'drop': {
+          const drop = this.drops.find((entry) => entry.id === action.id && entry.owner === player && !entry.dead);
+          if (!drop) return false;
+          this._collectDrop(drop);
+          return true;
+        }
+        default: return false;
+      }
+    } finally { this.player = this.ownPlayer; }
+  }
+
+  snapshot() {
+    const round = (number) => Math.round(number * 10) / 10;
+    return {
+      enemies: this.enemies.slice(0, 600).map((e) => [e.id, e.def.id, round(e.x), round(e.y), round(e.hp), e.slowPct, round(e.phase), e.shield, e.def.hp]),
+      towers: this.towers.map((t) => [t.uid, t.def.id, t.owner, round(t.x), round(t.y), t.angle,
+        t.upgrades, [...t.active], t.pops, t.targetMode, t.invested, (t.stunnedUntil ?? 0) > this.simTime]),
+      drops: this.drops.filter((drop) => !drop.dead).slice(0, 80),
+      shots: this.projectiles.slice(0, 60).map((p) => [round(p.x), round(p.y), p.kind, p.angle, p.life, p.flightTime, p.r]),
+      allies: this.allies.slice(0, 50).map((a) => [round(a.x), round(a.y), a.stats.allyKind, a.r]),
+      effects: this.effects.slice(-28), wallet: this.wallet, lives: this.lives,
+      collected: Object.fromEntries(Object.entries(this.activity).map(([id, value]) => [id, value.collected])),
+      abilityPool: Object.fromEntries(Object.entries(this.abilityPool).map(([id, slots]) => [id, slots.map((skill) => skill?.remaining ?? null)])),
+      round: this.round, roundActive: this.roundActive, autoStart: this.autoStart, speed: this.speed, over: this.over, paused: this.paused,
+    };
+  }
+
+  applySnapshot(state, sequence) {
+    if (!this.isGuest || sequence <= this.snapshotSeq || !state) return;
+    this.snapshotSeq = sequence;
+    const previous = new Map(this.enemies.map((enemy) => [enemy.id, enemy]));
+    this.enemies = state.enemies.flatMap(([id, defId, x, y, hp, slowPct, phase, shield, maxHp]) => {
+      const base = this.enemyDefs.get(defId);
+      if (!base) return [];
+      const def = base.hp === maxHp ? base : { ...base, hp: maxHp };
+      const before = previous.get(id);
+      return [{ id, def, x: before?.x ?? x, y: before?.y ?? y, beforeX: before?.x ?? x,
+        beforeY: before?.y ?? y, destX: x, destY: y, hp, slowPct, phase, shield, alive: true, r: def.size }];
+    });
+    this.snapshotAt = performance.now();
+    const selected = this.selected?.uid;
+    const prior = this.selected ? JSON.stringify([this.selected.upgrades, [...this.selected.active], this.selected.targetMode]) : '';
+    this.towers = state.towers.flatMap(([uid, defId, owner, x, y, angle, upgrades, active, pops, targetMode, invested, stunned]) => {
+      const entry = this.coop.teams[owner]?.roster.find((candidate) => candidate.def.id === defId);
+      return entry ? [{ uid, owner, entry, def: entry.def, x, y, angle, upgrades, active: new Set(active), pops,
+        targetMode, invested, stunnedUntil: stunned ? Infinity : 0 }] : [];
+    });
+    this.refreshTowerStats();
+    if (selected) {
+      this.selected = this.towers.find((tower) => tower.uid === selected) ?? null;
+      if (!this.selected || prior !== JSON.stringify([this.selected.upgrades, [...this.selected.active], this.selected.targetMode])) {
+        this.cb.onSelect?.(this.selected);
+      }
+    }
+    this.drops = (state.drops ?? []).filter((drop) => drop.owner === this.ownPlayer).map((drop) =>
+      ({ ...drop, life: drop.life ?? Infinity }));
+    this.projectiles = (state.shots ?? []).map(([x, y, kind, angle, life, flightTime, r]) => ({ x, y, kind, angle, life, flightTime, r }));
+    this.allies = (state.allies ?? []).map(([x, y, allyKind, r]) => ({ x, y, r, contacts: true, stats: { allyKind } }));
+    this.effects = state.effects ?? [];
+    if (Number.isFinite(state.wallet?.[this.ownPlayer])) this.gold = state.wallet[this.ownPlayer];
+    (state.abilityPool?.[this.ownPlayer] ?? []).forEach((seconds, slot) => {
+      if (this.abilities[slot] && Number.isFinite(seconds)) this.abilities[slot].remaining = seconds;
+    });
+    for (const field of ['lives', 'round', 'roundActive', 'autoStart', 'speed', 'over', 'paused']) this[field] = state[field];
+  }
+
+  _interpolateSnapshot(now) {
+    const p = Math.min(1, Math.max(0, (now - this.snapshotAt) / 100));
+    for (const enemy of this.enemies) {
+      enemy.x = enemy.beforeX + (enemy.destX - enemy.beforeX) * p;
+      enemy.y = enemy.beforeY + (enemy.destY - enemy.beforeY) * p;
+    }
   }
 
   // ---------- Render ----------
@@ -916,8 +1101,6 @@ export class Game {
     if (this.bg) ctx.drawImage(this.bg, 0, 0);
     ctx.setTransform(this.px, 0, 0, this.px, 0, 0);
 
-    for (const d of this.drops) this._drawDrop(ctx, d);
-
     if (this.selected) this._drawRange(ctx, this.selected.x, this.selected.y, this.selected.stats.range, true);
     for (const tower of this.towers) {
       if (!tower.stats.buffs) continue;
@@ -932,6 +1115,7 @@ export class Game {
         actor.x, projectY(actor.y, 6), actor.r, this.px);
       else this._drawEnemy(ctx, actor);
     }
+    for (const d of this.drops) if (!d.owner || d.owner === this.ownPlayer) this._drawDrop(ctx, d);
 
     for (const p of this.projectiles) this._drawProjectile(ctx, p);
 

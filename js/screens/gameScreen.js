@@ -13,28 +13,36 @@ import { economy } from '../game/economy.js';
 import { raidAvailable, raidPhase } from '../game/raids.js';
 import { abilityStats } from '../game/abilities.js';
 import { DAMAGE_LABELS, ELEMENT_LABELS } from '../game/elements.js';
+import { accountAction, cacheAccount, isOnline, sendOnline, setPresence, subscribeOnline } from '../core/online.js';
 
 const DRAG_THRESHOLD = 10;
 
-export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) {
+export function gameScreen(root, { phaseId, endless = false, raidId, biomeId, coop = null }) {
   const acc = currentAccount();
   if (!acc) { go('login'); return; }
   ensureProgress(acc);
   const data = getData();
   const raid = raidId && byId(data.raids, raidId);
   const raidMap = raid && byId(data.maps, raid.mapId);
-  if (raidId && (!raid || !raidAvailable(acc, raid) || !biomeUnlocked(acc, data.maps, raidMap?.biome))) {
+  if (raidId && (!raid || (!coop && (!raidAvailable(acc, raid) || !biomeUnlocked(acc, data.maps, raidMap?.biome))))) {
     toast('Você precisa de chaves para iniciar esta raide.', 'error');
     go('menu');
     return;
   }
   const endlessMap = data.maps.find((map) => map.biome === biomeId && biomeUnlocked(acc, data.maps, biomeId)) ?? data.maps[0];
   const phase = raid ? raidPhase(raid) : endless
-    ? { id: 'infinito', name: 'Modo Infinito', mapId: endlessMap?.id, startGold: 650, lives: 100, rounds: [], endless: uid('seed') }
+    ? { id: 'infinito', name: 'Modo Infinito', mapId: endlessMap?.id, startGold: 650, lives: 100, rounds: [], endless: coop?.room.seed ?? uid('seed') }
     : byId(data.phases, phaseId);
   const map = phase && byId(data.maps, phase.mapId);
   if (!phase || !map) { toast('Fase inválida.', 'error'); go('menu'); return; }
   const biome = byId(data.biomes, map.biome);
+  const online = isOnline();
+  const guest = Boolean(coop && coop.room.me !== coop.room.owner);
+  if (coop) root.dataset.room = coop.room.id;
+  let matchId = null;
+  let starting = false;
+  let coopStarted = false;
+  let leaving = false;
   const guideSteps = [
     ['place', 'Escolha Nanuk e toque numa área livre ao lado do caminho.'],
     ['round', 'Inicie a rodada para colocar a defesa à prova.'],
@@ -42,7 +50,7 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
     ['drop', 'Toque no baú de treino no mapa para praticar a coleta.'],
   ];
   const guideActions = new Set();
-  let showGuide = phaseId === data.phases[0]?.id && !acc.progress.tutorialDone;
+  let showGuide = !coop && phaseId === data.phases[0]?.id && !acc.progress.tutorialDone;
   const guideText = el('strong', { 'aria-live': 'polite', text: guideSteps[0][1] });
   const guide = el('div', { class: 'tutorial-guide', hidden: !showGuide }, guideText,
     el('button', { class: 'btn btn-small', text: 'Pular guia', onclick: closeGuide }));
@@ -54,15 +62,33 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
     try { saveAccount(acc); } catch (error) { toast(error.message, 'error'); }
   }
 
-  const roster = acc.progress.unlocked.map((id) => {
+  let roster = acc.progress.unlocked.map((id) => {
     const def = byId(data.eskimos, id);
     const ep = acc.progress.eskimos[id];
     return { def, nodes: def.tree.filter((n) => ep.skills.includes(n.id)), items: equippedItems(acc, id) };
   });
-  const abilities = acc.progress.activeAbilities.map((id) => {
+  let abilities = acc.progress.activeAbilities.map((id) => {
     const item = id && instanceItem(acc, id);
     return item ? abilityStats(data, item) : null;
   });
+  if (coop) {
+    const teams = Object.fromEntries(Object.entries(coop.teams).map(([id, team]) => [id, {
+      username: team.username,
+      roster: team.roster.flatMap(({ defId, skills, items }) => {
+        const def = byId(data.eskimos, defId);
+        if (!def) return [];
+        return [{ def, nodes: def.tree.filter((node) => skills.includes(node.id)),
+          items: items.map((itemId) => byId(data.items, itemId)).filter(Boolean) }];
+      }),
+      abilities: team.abilities.map((itemId) => {
+        const item = byId(data.items, itemId);
+        return item ? abilityStats(data, item) : null;
+      }),
+    }]));
+    coop = { ...coop, teams };
+    roster = teams[coop.room.me].roster;
+    abilities = teams[coop.room.me].abilities;
+  }
 
   const hud = {
     lives: el('span', { class: 'hud-val' }),
@@ -79,16 +105,57 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
       onclick: () => game.selectAbility(slot) }, ability.name, timer);
     return { button, timer };
   });
-  const startBtn = el('button', { class: 'btn btn-go', text: 'Iniciar rodada', onclick: () => game.startRound() });
-  const speedBtn = el('button', { class: 'btn btn-small', text: '1x', onclick: () => { game.speed = game.speed === 1 ? 2 : 1; } });
-  const autoBtn = el('button', { class: 'btn btn-small', text: 'Auto: não', onclick: () => {
+  const startBtn = el('button', { class: 'btn btn-go', text: 'Iniciar rodada', onclick: requestStart });
+  async function requestStart() {
+    if (guest || starting || game.over || leaving) return;
+    if (coop && !coopStarted) {
+      starting = true;
+      startBtn.disabled = true;
+      try {
+        await accountAction('/rooms', { action: 'round-one' });
+        if (leaving) return;
+        coopStarted = true;
+      } catch (error) { toast(error.message, 'error'); return; }
+      finally { starting = false; startBtn.disabled = false; }
+    }
+    if (online && !matchId && !coop) {
+      starting = true;
+      startBtn.disabled = true;
+      try {
+        const mode = raid ? 'raid' : endless ? 'endless' : 'phase';
+        const session = await accountAction('/match/start', { mode, id: raidId ?? (endless ? biome?.id ?? 'tundra' : phaseId) });
+        if (leaving) return;
+        matchId = session.matchId;
+        if (endless) phase.endless = session.seed;
+      } catch (error) {
+        toast(error.message, 'error');
+        return;
+      } finally {
+        starting = false;
+        startBtn.disabled = false;
+      }
+    }
+    game.startRound();
+  }
+  const speedBtn = el('button', { class: 'btn btn-small', text: '1x', disabled: guest, onclick: () => { game.speed = game.speed === 1 ? 2 : 1; } });
+  const pauseBtn = coop && el('button', { class: 'btn btn-small', text: 'Pausar', disabled: guest,
+    onclick: () => { game.paused = !game.paused; } });
+  const autoBtn = el('button', { class: 'btn btn-small', text: 'Auto: não', disabled: guest, onclick: () => {
     game.autoStart = !game.autoStart;
     if (game.autoStart && game.round > 0) game.startRound();
   } });
   const exitBtn = el('button', {
     class: 'btn btn-small btn-danger', text: 'Sair',
     onclick: async () => {
+      if (starting) return;
       if (game.over) { go('menu'); return; }
+      if (coop) {
+        if (!(await confirmDialog('Sair desta partida cooperativa?', { okLabel: 'Sair', danger: true }))) return;
+        try { await accountAction('/rooms', { action: 'leave' }); if (!leaving) go('menu', { tab: 'online' }); }
+        catch (error) { toast(error.message, 'error'); }
+        return;
+      }
+      if (online && !matchId) { go('menu'); return; }
       if (raid && !game.raidStarted) { go('menu'); return; }
       const message = endless ? 'Encerrar a partida e registrar as rodadas concluídas?' :
         'Abandonar a partida conta como derrota. Itens já coletados são mantidos.';
@@ -115,19 +182,19 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
         el('span', { class: 'hud-item', title: 'Rodada' }, 'Rodada ', hud.round),
         biome?.hint && el('button', { class: 'btn btn-small', text: biome.name,
           title: biome.hint, onclick: () => toast(biome.hint, 'info', 5000) })),
-      el('div', { class: 'hud-actions' }, autoBtn, speedBtn, startBtn, exitBtn),
+      el('div', { class: 'hud-actions' }, autoBtn, speedBtn, startBtn, pauseBtn, exitBtn),
       abilityButtons.some(Boolean) && el('div', { class: 'hud-abilities' }, abilityButtons.map((entry) => entry?.button)), bossStatus),
     guide,
     el('div', { class: 'game-body' }, el('div', { class: 'canvas-wrap' }, canvas, panel), bar)));
 
   const game = new Game(canvas, {
-    data, phase, map, roster, abilities,
+    data, phase, map, roster, abilities, coop,
     callbacks: {
       onHud: (s) => {
         hud.lives.textContent = s.lives;
         hud.gold.textContent = s.gold;
         hud.round.textContent = endless ? String(s.round + 1) : `${Math.min(s.round + 1, s.totalRounds)}/${s.totalRounds}`;
-        startBtn.disabled = s.roundActive || s.over || s.preparation !== null;
+        startBtn.disabled = guest || starting || s.roundActive || s.over || s.preparation !== null;
         const upcoming = !s.roundActive && game.nextRound();
         const air = upcoming && roundsHaveAir([upcoming], data.enemies);
         startBtn.textContent = s.preparation !== null ? `Chefe em ${s.preparation}s` :
@@ -146,6 +213,7 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
           bossName.textContent = `${boss.name} · atordoa torres próximas por ${raid.bossAbility.duration}s`;
         }
         speedBtn.textContent = `${s.speed}x`;
+        if (pauseBtn) pauseBtn.textContent = s.paused ? 'Retomar' : 'Pausar';
         autoBtn.textContent = `Auto: ${s.autoStart ? 'sim' : 'não'}`;
         abilityButtons.forEach((entry, slot) => {
           if (!entry) return;
@@ -162,6 +230,9 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
       onSelect: (t) => renderPanel(t),
       onToast: (m, type) => toast(m, type, 2000),
       onEnd: (r) => showResult(r),
+      serverLoot: online,
+      canStartRound: () => !online || Boolean(matchId) || coopStarted,
+      onStartRequest: requestStart,
       needsPracticeDrop: () => showGuide && !guideActions.has('drop'),
       onAction: (action) => {
         if (!showGuide) return;
@@ -170,7 +241,14 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
         if (step) guideText.textContent = step[1];
         else { closeGuide(); toast('Treino concluído.', 'success'); }
       },
+      onCommand: (action) => {
+        const sent = sendOnline({ type: 'room/command', action });
+        if (!sent) toast('Reconectando à sala…', 'info');
+        return sent;
+      },
+      onSnapshot: (state) => sendOnline({ type: 'room/snapshot', state }),
       onRaidStart: () => {
+        if (online) return Boolean(matchId) || coopStarted;
         try {
           spendRaidKeys(acc, raid);
           return true;
@@ -178,6 +256,24 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
       },
     },
   });
+  const unlisten = coop && subscribeOnline((message) => {
+    if (message.type === 'room/snapshot') game.applySnapshot(message.state, message.seq);
+    if (message.type === 'room/command' && !game.remoteAction(message.from, message.action)) {
+      sendOnline({ type: 'room/reject', target: message.from, message: 'Comando recusado. Verifique o ouro, o alvo ou a posição.' });
+    }
+    if (message.type === 'room/reject') toast(message.message, 'error');
+    if (message.type === 'room/result') {
+      if (Number.isFinite(message.lives)) game.lives = message.lives;
+      if (Number.isFinite(message.gold)) game.gold = message.gold;
+      game.round = message.roundsCompleted;
+      game.roundActive = false;
+      game.over = true;
+      acc.progress = message.progress;
+      cacheAccount(acc);
+      displayResult(message, message.result);
+    }
+  });
+  if (online) setPresence(true);
   if (roundsHaveAir(phase.rounds, data.enemies) &&
       !roster.some((entry) => computeStats(entry.def, entry).hitsAir)) {
     toast('Esta fase tem inimigos voadores.', 'info');
@@ -274,9 +370,35 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
         el('button', { class: 'btn btn-small btn-danger', text: `Vender (${game.sellValue(t)})`, onclick: () => game.sell(t) })));
   }
 
-  function showResult(r) {
+  async function showResult(r) {
     renderPanel(null);
-    const res = applyMatchResult(acc, r);
+    let res;
+    try {
+      if (coop) {
+        await accountAction('/rooms', { action: 'finish', victory: r.victory, roundsCompleted: r.roundsCompleted,
+          players: r.players, final: { lives: game.lives, wallet: game.wallet } });
+        return;
+      } else if (online) {
+        const saved = await accountAction('/match/result', {
+          matchId, victory: r.victory, roundsCompleted: r.roundsCompleted, collected: Math.min(200, r.collectedLoot),
+          usedEskimos: r.usedEskimos,
+        });
+        if (leaving) return;
+        acc.progress = saved.account.progress;
+        res = saved.result;
+      } else res = applyMatchResult(acc, r);
+    } catch (error) {
+      if (leaving) return;
+      modal({
+        title: 'Progresso pendente', body: el('p', { text: error.message }), dismissable: false,
+        actions: [{ label: 'Menu', onClick: () => go('menu') }, { label: 'Tentar novamente', onClick: () => showResult(r) }],
+      });
+      return;
+    }
+    displayResult(r, res);
+  }
+
+  function displayResult(r, res) {
     const itemDefs = res.gained.map((instance) => byId(data.items, instance.itemId)).filter(Boolean);
     modal({
       title: endless ? 'Fim do Infinito' : r.victory ? 'Vitória!' : 'Derrota',
@@ -287,14 +409,14 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
         el('p', { text: `XP para cada esquimó usado: +${res.xp}` }),
         res.fragments > 0 && el('p', { class: 'bonus', text: `+${res.fragments} fragmentos · ${res.biome.name}` }),
         res.fragmentXp && el('p', { class: 'bonus', text: `+${res.fragmentXp.amount} XP de fragmentos · ${res.fragmentXp.name}` }),
-        res.levelUps.length && el('p', { class: 'bonus', text: `Novo ponto de habilidade: ${res.levelUps.map((id) => byId(data.eskimos, id)?.name).join(', ')}` }),
-        res.newUnlocks.length && el('div', { class: 'unlocks' }, el('p', { class: 'bonus', text: 'Novo esquimó desbloqueado!' }),
+        res.levelUps.length > 0 && el('p', { class: 'bonus', text: `Novo ponto de habilidade: ${res.levelUps.map((id) => byId(data.eskimos, id)?.name).join(', ')}` }),
+        res.newUnlocks.length > 0 && el('div', { class: 'unlocks' }, el('p', { class: 'bonus', text: 'Novo esquimó desbloqueado!' }),
           res.newUnlocks.map((d) => el('div', { class: 'unlock' }, eskimoCanvas(d, 64), el('strong', { text: d.name })))),
         el('h4', { text: itemDefs.length ? 'Itens coletados' : 'Nenhum item coletado' }),
         el('ul', { class: 'item-list' }, itemDefs.map((it) => el('li', { class: `rarity-${it.rarity}` }, itemCanvas(it, 28), el('strong', { text: it.name }))))),
       actions: [
         { label: 'Quartel', onClick: () => go('menu', { tab: 'quartel' }) },
-        ...(!raid || raidAvailable(acc, raid) ? [{ label: 'Jogar de novo', onClick: () => go('game', { phaseId, endless, raidId, biomeId }) }] : []),
+        ...(!coop && (!raid || raidAvailable(acc, raid)) ? [{ label: 'Jogar de novo', onClick: () => go('game', { phaseId, endless, raidId, biomeId }) }] : []),
         { label: 'Menu', class: 'btn-primary', onClick: () => go('menu') },
       ],
     });
@@ -306,6 +428,10 @@ export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) 
   }
 
   return () => {
+    leaving = true;
+    delete root.dataset.room;
+    if (unlisten) unlisten();
+    if (online) setPresence(false);
     if (window.__etdGame === game) delete window.__etdGame;
     game.destroy();
     document.querySelectorAll('.modal-overlay').forEach((m) => m.remove());

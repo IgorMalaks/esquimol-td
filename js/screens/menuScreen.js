@@ -1,7 +1,7 @@
 // Menu pré-partida: Fases, Quartel (árvore + equipamentos) e Inventário.
-import { el, toast, confirmDialog } from '../core/utils.js';
+import { el, toast, confirmDialog, modal } from '../core/utils.js';
 import { go } from '../core/router.js';
-import { currentAccount, logout, saveAccount } from '../core/auth.js';
+import { currentAccount, getAccount, logout, saveAccount } from '../core/auth.js';
 import { getData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES } from '../data/defaults.js';
 import {
@@ -19,6 +19,7 @@ import { abilityStats } from '../game/abilities.js';
 import { DAMAGE_LABELS, ELEMENT_LABELS, damageMultiplier } from '../game/elements.js';
 import { ENEMY_TRAITS } from '../game/enemies.js';
 import { preferencesButton } from '../core/preferences.js';
+import { accountAction, cacheAccount, currentContentHash, isOnline, requestAPI, subscribeOnline } from '../core/online.js';
 
 const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
@@ -31,13 +32,38 @@ export function menuScreen(root, params = {}) {
   let tab = params.tab || 'fases';
   let selectedEskimo = params.eskimo || acc.progress.unlocked[0];
   const content = el('div', { class: 'menu-content' });
+  const online = isOnline();
+  let friendsList, rankingList, tradeList, roomsList;
+  let lastFriends = null;
+  let activeRoom = null;
+  let recentTrade = null;
+  const unsubscribe = online ? subscribeOnline((message) => {
+    if (tab === 'online' && message.type === 'friends') renderFriends(message);
+    if (tab === 'online' && message.type === 'room') renderRoom(message.room);
+    if (tab === 'online' && message.type === 'room/closed') {
+      renderRoom({ id: null, invitations: [] });
+      toast(message.message, 'info');
+    }
+    if (message.type === 'trade') {
+      if (tab === 'online') renderTrades(message);
+      const completed = message.history[0]?.id;
+      if (completed && completed !== recentTrade) {
+        recentTrade = completed;
+        requestAPI('/me').then((current) => {
+          acc.progress = cacheAccount(current).progress;
+          if (tab === 'inventario') render();
+        }).catch((error) => toast(error.message, 'error'));
+      }
+    }
+  }) : null;
 
-  const tabBtns = [['fases', 'Fases'], ['quartel', 'Quartel'], ['inventario', 'Inventário'], ['bestiario', 'Bestiário']].map(([id, label]) =>
+  const tabBtns = [['fases', 'Fases'], ['quartel', 'Quartel'], ['inventario', 'Inventário'], ['bestiario', 'Bestiário'],
+    ...(online ? [['online', 'Online']] : [])].map(([id, label]) =>
     el('button', { class: 'tab', text: label, 'data-tab': id, onclick: () => { tab = id; render(); } }));
 
   function render() {
     tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-    const view = { fases: phasesView, quartel: barracksView, inventario: inventoryView, bestiario: bestiaryView };
+    const view = { fases: phasesView, quartel: barracksView, inventario: inventoryView, bestiario: bestiaryView, online: onlineView };
     content.replaceChildren((view[tab] ?? phasesView)());
   }
 
@@ -106,8 +132,12 @@ export function menuScreen(root, params = {}) {
       el('p', { text: `${balance}/${unlock.amount} fragmentos · ${biome?.name}` }),
       el('progress', { max: unlock.amount, value: Math.min(balance, unlock.amount), 'aria-label': 'Fragmentos' }),
       el('div', { class: 'form-actions' }, el('button', { class: 'btn btn-primary', text: 'Recrutar',
-        disabled: balance < unlock.amount, onclick: () => {
-          try { recruitVariant(acc, def.id); render(); }
+        disabled: balance < unlock.amount, onclick: async () => {
+          try {
+            if (online) acc.progress = (await accountAction('/recruit', { id: def.id })).account.progress;
+            else recruitVariant(acc, def.id);
+            render();
+          }
           catch (error) { toast(error.message, 'error'); }
         } }))));
   }
@@ -121,10 +151,203 @@ export function menuScreen(root, params = {}) {
       const resisted = classified.filter(([, value]) => value <= 0.5).map(([name]) => name);
       return el('article', { class: 'card' }, faceCanvas(enemy.face, 60), el('h3', { text: enemy.name }),
         el('p', { text: ELEMENT_LABELS[enemy.element ?? 'neutro'] }),
-        enemy.traits?.length && el('p', { text: enemy.traits.map((trait) => ENEMY_TRAITS[trait]).filter(Boolean).join(' · ') }),
-        weak.length && el('p', { text: `Fraquezas · ${weak.join(', ')}` }),
-        resisted.length && el('p', { text: `Resistências · ${resisted.join(', ')}` }));
+        enemy.traits?.length > 0 && el('p', { text: enemy.traits.map((trait) => ENEMY_TRAITS[trait]).filter(Boolean).join(' · ') }),
+        weak.length > 0 && el('p', { text: `Fraquezas · ${weak.join(', ')}` }),
+        resisted.length > 0 && el('p', { text: `Resistências · ${resisted.join(', ')}` }));
     }));
+  }
+
+  async function updateFriends(username, action) {
+    try {
+      const result = await requestAPI('/friends', { method: 'POST', body: { username, action } });
+      if (tab === 'online') renderFriends(result);
+    } catch (error) { toast(error.message, 'error'); }
+  }
+
+  function renderFriends(info) {
+    lastFriends = info;
+    if (!friendsList?.isConnected) return;
+    friendsList.replaceChildren(
+      ...info.inbound.map((username) => el('div', { class: 'form-actions' }, el('strong', { text: username }),
+        el('button', { class: 'btn btn-small btn-primary', text: 'Aceitar', onclick: () => updateFriends(username, 'accept') }),
+        el('button', { class: 'btn btn-small', text: 'Recusar', onclick: () => updateFriends(username, 'decline') }))),
+      ...(info.friends.length ? info.friends.map(({ username, presence }) => el('div', { class: 'form-actions' },
+        el('strong', { text: username }), el('span', { class: 'muted', text: presence }),
+        presence === 'online' && el('button', { class: 'btn btn-small', text: 'Negociar', onclick: () => sendTrade('invite', { username }) }),
+        presence === 'online' && activeRoom?.owner === activeRoom?.me && activeRoom?.id &&
+          el('button', { class: 'btn btn-small', text: 'Convidar para sala', onclick: () => roomAction('invite', { username }) }),
+        el('button', { class: 'btn btn-small', text: 'Remover', onclick: () => updateFriends(username, 'remove') }),
+        el('button', { class: 'btn btn-small', text: 'Bloquear', onclick: () => updateFriends(username, 'block') }))) :
+        [el('p', { class: 'muted', text: 'Nenhum amigo adicionado.' })]),
+      ...info.blocked.map((username) => el('div', { class: 'form-actions' }, el('span', { text: username }),
+        el('button', { class: 'btn btn-small', text: 'Desbloquear', onclick: () => updateFriends(username, 'unblock') }))));
+  }
+
+  async function roomAction(action, details = {}) {
+    try {
+      const room = await requestAPI('/rooms', { method: 'POST', body: { action, ...details } });
+      if (tab === 'online') renderRoom(room);
+    } catch (error) { toast(error.message, 'error'); }
+  }
+
+  function renderRoom(room) {
+    activeRoom = room;
+    if (lastFriends) renderFriends(lastFriends);
+    if (!roomsList?.isConnected) return;
+    if (!room.id) {
+      const options = [
+        ...data.phases.filter((phase, index) => phaseUnlocked(acc, index)).map((phase) => ['phase', phase.id, phase.name]),
+        ...data.raids.filter((raid) => raidAvailable(acc, raid) && biomeUnlocked(acc, data.maps, byId(data.maps, raid.mapId)?.biome))
+          .map((raid) => ['raid', raid.id, raid.name]),
+        ...data.biomes.filter((biome) => biomeUnlocked(acc, data.maps, biome.id) && data.maps.some((map) => map.biome === biome.id))
+          .map((biome) => ['endless', biome.id, `Infinito · ${biome.name}`]),
+      ];
+      const select = el('select', {}, options.map(([mode, id, title]) => el('option', { value: `${mode}:${id}`, text: title })));
+      roomsList.replaceChildren(
+        ...room.invitations.map((invite) => el('div', { class: 'form-actions' },
+          el('p', { text: `Convite de ${invite.owner} · ${invite.title}` }),
+          el('button', { class: 'btn btn-small btn-primary', text: 'Entrar na sala', onclick: () => roomAction('join', { id: invite.id }) }))),
+        el('label', { class: 'field' }, el('span', { text: 'Modo cooperativo' }), select),
+        el('div', { class: 'form-actions' }, el('button', { class: 'btn btn-small', text: 'Criar sala',
+          onclick: () => {
+            const [mode, target] = select.value.split(':');
+            roomAction('create', { mode, target });
+          } })));
+      return;
+    }
+    const ready = room.members.find((member) => member.id === room.me)?.ready;
+    const owner = room.me === room.owner;
+    roomsList.replaceChildren(
+      el('h3', { text: room.title ?? 'Sala' }),
+      el('ul', {}, room.members.map((member) => el('li', { text:
+        `${member.name} · ${member.id === room.owner ? 'Dono · ' : ''}${member.ready ? 'Pronto' : 'Aguardando'}` }))),
+      owner && el('p', { class: 'muted', text: 'Use “Convidar para sala” na lista de amigos online.' }),
+      el('div', { class: 'form-actions' },
+        el('button', { class: 'btn btn-small', text: ready ? 'Desmarcar pronto' : 'Pronto',
+          onclick: () => roomAction('ready', { ready: !ready, contentHash: currentContentHash() }) }),
+        owner && el('button', { class: 'btn btn-small btn-primary', text: 'Começar coop',
+          disabled: room.members.length < 2 || room.members.some((member) => !member.ready || !member.online),
+          onclick: () => roomAction('start') }),
+        el('button', { class: 'btn btn-small', text: 'Sair da sala', onclick: () => roomAction('leave') })));
+  }
+
+  async function sendTrade(action, values = {}) {
+    try {
+      const info = await requestAPI('/trade', { method: 'POST', body: { action, ...values } });
+      if (tab === 'online') renderTrades(info);
+    } catch (error) { toast(error.message, 'error'); }
+  }
+
+  function renderTrades(info) {
+    if (!tradeList?.isConnected) return;
+    const itemSummary = (offer) => offer.length ? offer.map((entry) => entry.name).join(', ') : 'Sem itens';
+    tradeList.replaceChildren(
+      ...(info.trades.length ? info.trades.map((trade) => {
+        const act = (action, title, primary = false) => el('button', {
+          class: `btn btn-small ${primary ? 'btn-primary' : ''}`, text: title,
+          onclick: () => sendTrade(action, { id: trade.id }),
+        });
+        const current = new Set(trade.mine.map((item) => item.uid));
+        const checks = trade.available.map((item) => {
+          const input = el('input', { type: 'checkbox', checked: current.has(item.uid) });
+          return { uid: item.uid, input, label: el('label', {}, input, ` ${item.name} · ${RARITIES[item.rarity]?.name}`) };
+        });
+        return el('article', {},
+          el('h3', { text: trade.partner }),
+          trade.status === 'invite' ?
+            el('div', { class: 'form-actions' }, el('p', { text: trade.incoming ? 'Quer negociar com você.' : 'Aguardando resposta.' }),
+              trade.incoming && act('accept', 'Aceitar', true), act('cancel', 'Cancelar')) :
+            el('div', {},
+              el('p', { text: `Sua oferta · ${itemSummary(trade.mine)}` }),
+              el('p', { text: `Oferta de ${trade.partner} · ${itemSummary(trade.theirs)}` }),
+              el('p', { text: trade.status === 'countdown' ? 'Troca confirmada. Você ainda pode cancelar.' :
+                `${trade.confirmed ? 'Você confirmou' : 'Você ainda não confirmou'} · ${trade.partnerConfirmed ? 'Amigo confirmou' : 'Aguardando amigo'}` }),
+              trade.status === 'open' && checks.length > 0 && el('details', {},
+                el('summary', { text: 'Editar oferta (até 6 itens)' }),
+                el('div', { class: 'trade-items' }, checks.map((entry) => entry.label)),
+                el('button', { class: 'btn btn-small', text: 'Salvar oferta', onclick: () =>
+                  sendTrade('offer', { id: trade.id, uids: checks.filter((entry) => entry.input.checked).map((entry) => entry.uid) }) })),
+              el('div', { class: 'form-actions' }, trade.status === 'open' && !trade.confirmed && act('confirm', 'Confirmar troca', true),
+                act('cancel', 'Cancelar'))));
+      }) : [el('p', { class: 'muted', text: 'Convide um amigo online para negociar.' })]),
+      ...(info.history.length > 0 ? [el('details', {},
+        el('summary', { text: 'Histórico de trocas' }),
+        el('ul', {}, info.history.map((entry) => el('li', { text:
+          `${entry.partner} · Enviados: ${entry.sent.join(', ') || 'nenhum'} · Recebidos: ${entry.received.join(', ') || 'nenhum'}` }))))] : []));
+  }
+
+  function onlineView() {
+    friendsList = el('div', {}, el('p', { class: 'muted', text: 'Carregando amigos…' }));
+    rankingList = el('div', {}, el('p', { class: 'muted', text: 'Carregando ranking…' }));
+    tradeList = el('div', {}, el('p', { class: 'muted', text: 'Carregando trocas…' }));
+    roomsList = el('div', {}, el('p', { class: 'muted', text: 'Carregando salas…' }));
+    const target = el('input', { required: true, maxlength: 20, placeholder: 'Nome de jogador' });
+    const local = getAccount(acc.username);
+    async function importProgress(progress) {
+      if (!(await confirmDialog('Importar progresso e itens locais uma única vez para a conta online?', { okLabel: 'Importar' }))) return;
+      try {
+        Object.assign(acc, cacheAccount(await requestAPI('/import-local', { method: 'POST', body: { progress } })));
+        render();
+        toast('Progresso importado.', 'success');
+      } catch (error) { toast(error.message, 'error'); }
+    }
+    const backup = el('input', { type: 'file', accept: 'application/json', class: 'hidden',
+      onchange: async () => {
+        try {
+          const file = backup.files[0];
+          if (!file || file.size > 2_000_000) throw new Error('Selecione um backup de até 2 MB.');
+          const payload = JSON.parse(await file.text());
+          if (payload.username?.toLowerCase() !== acc.username.toLowerCase() || !payload.progress) {
+            throw new Error('O backup precisa pertencer ao mesmo usuário.');
+          }
+          await importProgress(payload.progress);
+        } catch (error) { toast(error.message, 'error'); }
+        finally { backup.value = ''; }
+      },
+    });
+    function removeAccount() {
+      const password = el('input', { type: 'password', autocomplete: 'current-password' });
+      modal({
+        title: 'Excluir minha conta',
+        body: el('div', {}, el('p', { text: 'A exclusão apaga seu progresso, itens e amizades. Confirme com sua senha.' }),
+          el('label', { class: 'field' }, el('span', { text: 'Senha atual' }), password)),
+        actions: [{ label: 'Cancelar' }, { label: 'Excluir conta', class: 'btn-danger', onClick: async () => {
+          try {
+            await requestAPI('/me', { method: 'DELETE', body: { password: password.value } });
+            cacheAccount(null);
+            go('login');
+          } catch (error) { toast(error.message, 'error'); }
+        } }],
+      });
+    }
+    requestAPI('/friends').then(renderFriends).catch((error) => toast(error.message, 'error'));
+    requestAPI('/trade').then(renderTrades).catch((error) => toast(error.message, 'error'));
+    requestAPI('/rooms').then(renderRoom).catch((error) => toast(error.message, 'error'));
+    requestAPI('/ranking/infinite').then(({ solo, coop }) => {
+      if (!rankingList?.isConnected) return;
+      const scores = (entries, prefix) => entries.length ? el('ol', {}, entries.map((entry) =>
+        el('li', { text: `${prefix(entry)} · rodada ${entry.melhorWave}` }))) :
+        el('p', { class: 'muted', text: 'Nenhum recorde registrado.' });
+      rankingList.replaceChildren(el('h3', { text: 'Solo' }), scores(solo, (entry) => entry.username),
+        el('h3', { text: 'Coop' }), scores(coop, (entry) => entry.equipe.join(', ')));
+    }).catch((error) => toast(error.message, 'error'));
+
+    return el('div', { class: 'phase-grid' },
+      el('section', { class: 'card' }, el('h2', { text: 'Amigos' }),
+        el('form', { onsubmit: (event) => { event.preventDefault(); updateFriends(target.value.trim(), 'request'); } },
+          el('label', { class: 'field' }, el('span', { text: 'Adicionar pelo usuário' }), target),
+          el('div', { class: 'form-actions' }, el('button', { class: 'btn btn-small', type: 'submit', text: 'Enviar pedido' }))),
+        friendsList),
+      el('section', { class: 'card' }, el('h2', { text: 'Ranking do Infinito' }), rankingList),
+      el('section', { class: 'card' }, el('h2', { text: 'Trocas' }), tradeList),
+      el('section', { class: 'card' }, el('h2', { text: 'Sala cooperativa' }), roomsList),
+      el('section', { class: 'card' }, el('h2', { text: 'Meus dados' }),
+        el('div', { class: 'form-actions' },
+          el('a', { class: 'btn btn-small', href: '/api/me/export', text: 'Exportar meus dados' }),
+          !acc.localImported && local?.progress && el('button', { class: 'btn btn-small',
+            text: 'Importar progresso deste navegador', onclick: () => importProgress(local.progress) }),
+          !acc.localImported && el('button', { class: 'btn btn-small', text: 'Importar arquivo de progresso', onclick: () => backup.click() }),
+          el('button', { class: 'btn btn-small btn-danger', text: 'Excluir minha conta', onclick: removeAccount }), backup)));
   }
 
   function eskimoDetail(def) {
@@ -224,7 +447,12 @@ export function menuScreen(root, params = {}) {
           if (!(await confirmDialog(`A fusão tem ${chance}% de chance de gerar um item de raridade superior. Se falhar, você perde duas cópias.`,
             { okLabel: 'Fundir', danger: true }))) return;
           try {
-            const result = fuseItems(acc, copies.slice(0, 3));
+            let result;
+            if (online) {
+              const response = await accountAction('/fusion', { uids: copies.slice(0, 3) });
+              acc.progress = response.account.progress;
+              result = response.result;
+            } else result = fuseItems(acc, copies.slice(0, 3));
             toast(result ? `Você obteve ${result.name}!` : 'A fusão falhou. Uma cópia foi devolvida.', result ? 'success' : 'info');
             render();
           } catch (error) { toast(error.message, 'error'); }
@@ -263,6 +491,12 @@ export function menuScreen(root, params = {}) {
   }
 
   const s = acc.progress.stats;
+  function exportLocal() {
+    const content = JSON.stringify({ username: acc.username, progress: acc.progress }, null, 2);
+    const href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+    el('a', { href, download: 'esquimo-progresso.json' }).click();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  }
   root.append(el('div', { class: 'screen screen-menu' },
     el('header', { class: 'topbar' },
       el('h1', { class: 'logo logo-small' }, 'Esquimó', el('span', { text: 'TD' })),
@@ -270,8 +504,13 @@ export function menuScreen(root, params = {}) {
         el('strong', { text: acc.username }),
         el('small', { text: `${s.wins} vitórias · ${s.roundsTotal} rodadas` })),
       preferencesButton(),
-      el('button', { class: 'btn btn-small', text: 'Sair', onclick: () => { logout(); go('login'); } })),
+      !online && el('button', { class: 'btn btn-small', text: 'Exportar progresso', onclick: exportLocal }),
+      online && acc.role === 'admin' && el('button', { class: 'btn btn-small', text: 'Admin', onclick: () => go('admin') }),
+      el('button', { class: 'btn btn-small', text: 'Sair', onclick: async () => {
+        try { await logout(); go('login'); } catch (error) { toast(error.message, 'error'); }
+      } })),
     el('nav', { class: 'tabs tabs-scroll' }, tabBtns),
     content));
   render();
+  return unsubscribe;
 }

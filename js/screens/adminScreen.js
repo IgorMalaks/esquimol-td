@@ -12,6 +12,7 @@ import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
 import { economy, RARITY_ORDER } from '../game/economy.js';
 import { DAMAGE_LABELS, DEFAULT_MATRIX, ELEMENT_LABELS } from '../game/elements.js';
 import { BIOME_DEFAULTS, FRAGMENT_DEFAULTS } from '../data/biomes.js';
+import { isOnline } from '../core/online.js';
 import { rbe, layerChain } from '../core/progression.js';
 import { createFaceEditor } from '../ui/faceEditor.js';
 import { drawEskimo, eskimoCanvas, faceCanvas, itemCanvas } from '../render/faceRenderer.js';
@@ -69,7 +70,7 @@ function entityTab(cfg) {
   if (!draft) return el('div', { class: 'admin-layout' }, listNode, el('div', { class: 'card' }, el('p', { text: 'Nada cadastrado ainda.' })));
 
   const form = cfg.buildForm(draft);
-  const save = () => {
+  const save = async () => {
     try {
       form.read(draft);
       if (!draft.name?.trim()) throw new Error('Informe um nome.');
@@ -77,7 +78,7 @@ function entityTab(cfg) {
       const next = clone(getData());
       const idx = next[cfg.key].findIndex((x) => x.id === draft.id);
       if (idx >= 0) next[cfg.key][idx] = clone(draft); else next[cfg.key].push(clone(draft));
-      saveData(next);
+      await saveData(next);
       state[cfg.key] = draft.id;
       toast('Salvo!', 'success');
       render();
@@ -93,7 +94,7 @@ function entityTab(cfg) {
     try {
       const next = clone(getData());
       next[cfg.key] = next[cfg.key].filter((x) => x.id !== draft.id);
-      saveData(next);
+      await saveData(next);
       state[cfg.key] = null;
       render();
     } catch (e) { toast(e.message, 'error', 4000); }
@@ -490,14 +491,14 @@ function economyTab() {
   return el('div', { class: 'card data-tab' },
     groups.map(({ label, form }) => section(label, form.node)),
     section('Raridades que podem subir por fusão', el('div', { class: 'grid-4' }, fusion.map((entry) => entry.node))),
-    el('button', { class: 'btn btn-primary', text: 'Salvar economia', onclick: () => {
+    el('button', { class: 'btn btn-primary', text: 'Salvar economia', onclick: async () => {
       try {
         for (const { form } of groups) form.read(draft);
         for (const { rarity, input } of fusion) draft.fusionAllowed[rarity] = input.checked;
         const fragments = draft.fragments;
         if (fragments.layerChance < 0 || fragments.layerChance > 1 || fragments.raidMin > fragments.raidMax ||
             fragments.endlessInterval < 1 || fragments.xp < 1) throw new Error('Configuração de fragmentos inválida.');
-        saveData({ ...getData(), economy: draft });
+        await saveData({ ...getData(), economy: draft });
         toast('Economia salva.', 'success');
       } catch (error) { toast(error.message, 'error'); }
     } }));
@@ -513,10 +514,10 @@ function elementsTab() {
   }));
   return el('div', { class: 'card data-tab' },
     forms.map(({ title, fields }) => section(title, fields.node)),
-    el('button', { class: 'btn btn-primary', text: 'Salvar matriz', onclick: () => {
+    el('button', { class: 'btn btn-primary', text: 'Salvar matriz', onclick: async () => {
       try {
         for (const { fields, element } of forms) fields.read(draft[element]);
-        saveData({ ...getData(), elements: draft });
+        await saveData({ ...getData(), elements: draft });
         toast('Matriz salva.', 'success');
       } catch (error) { toast(error.message, 'error'); }
     } }));
@@ -542,7 +543,7 @@ function dataTab() {
       if (file.size > 2_000_000) throw new Error('Arquivo muito grande.');
       const parsed = prepareData(JSON.parse(await file.text()));
       if (!(await confirmDialog('Substituir TODO o conteúdo atual pelo arquivo importado?', { danger: true, okLabel: 'Importar' }))) return;
-      saveData(parsed, { replace: true });
+      await saveData(parsed, { replace: true });
       toast('Conteúdo importado.', 'success');
       render();
     } catch (e) { toast(`Importação falhou: ${e.message}`, 'error', 4000); } finally { fileInput.value = ''; }
@@ -568,13 +569,17 @@ function dataTab() {
       el('div', { class: 'form-actions' },
         el('button', {
           class: 'btn btn-danger', text: 'Restaurar conteúdo padrão',
-          onclick: async () => { if (await confirmDialog('Apagar todas as edições do admin e voltar ao conteúdo padrão?', { danger: true })) { resetData(); toast('Restaurado.', 'success'); render(); } },
+          onclick: async () => {
+            if (!(await confirmDialog('Apagar todas as edições do admin e voltar ao conteúdo padrão?', { danger: true }))) return;
+            try { await resetData(); toast('Restaurado.', 'success'); render(); }
+            catch (error) { toast(error.message, 'error'); }
+          },
         }),
-        el('button', {
+        !isOnline() && el('button', {
           class: 'btn btn-danger', text: 'Apagar todas as contas de jogador',
           onclick: async () => { if (await confirmDialog('Apagar TODAS as contas e progresso deste navegador?', { danger: true })) { storage.remove('accounts'); storage.remove('session'); toast('Contas apagadas.', 'success'); } },
         }))),
-    section('Trocar senha do admin',
+    !isOnline() && section('Trocar senha do admin',
       el('div', { class: 'grid-3' },
         el('label', { class: 'field' }, el('span', { text: 'Senha atual' }), cur),
         el('label', { class: 'field' }, el('span', { text: 'Nova senha' }), nxt),
@@ -647,8 +652,10 @@ function render() {
     el('header', { class: 'topbar' },
       el('h1', { class: 'logo logo-small' }, 'Painel ', el('span', { text: 'Admin' })),
       el('div', { class: 'spacer' }),
-      el('button', { class: 'btn btn-small', text: 'Ir para o jogo', onclick: () => go('login') }),
-      el('button', { class: 'btn btn-small btn-danger', text: 'Sair do admin', onclick: () => { adminLogout(); go('login'); } })),
+      el('button', { class: 'btn btn-small', text: 'Ir para o jogo', onclick: () => go(isOnline() ? 'menu' : 'login') }),
+      el('button', { class: 'btn btn-small btn-danger', text: 'Sair do admin', onclick: async () => {
+        try { await adminLogout(); go('login'); } catch (error) { toast(error.message, 'error'); }
+      } })),
     el('nav', { class: 'tabs tabs-scroll' }, TABS.map(([id, label]) => el('button', {
       class: `tab ${state.tab === id ? 'active' : ''}`, text: label, onclick: () => { state.tab = id; render(); },
     }))),

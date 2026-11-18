@@ -1,4 +1,5 @@
 import { createDefaultData } from '../js/data/defaults.js';
+import { BIOME_DEFAULTS, FRAGMENT_DEFAULTS, fragmentReward } from '../js/data/biomes.js';
 import { seededRandom } from '../js/core/utils.js';
 import { economy, endlessBudget, rollItem } from '../js/game/economy.js';
 import { endlessEnemies, endlessRound } from '../js/game/endless.js';
@@ -28,8 +29,7 @@ for (const { groups } of phase.rounds) {
 const pops = [...layers.values()].reduce((sum, count) => sum + count, 0);
 const curve = new Map();
 let firstLegendary = null;
-let biomes = new Map();
-for (const biome of ['floresta', 'caverna', 'fontes_termais', 'picos', 'ruinas']) biomes.set(biome, 0);
+const biomes = new Map(BIOME_DEFAULTS.filter((biome) => biome.id !== 'tundra').map((biome) => [biome.id, 0]));
 for (let match = 1; match <= matches; match++) {
   for (const [enemy, count] of layers) {
     for (let i = 0; i < count; i++) {
@@ -41,8 +41,9 @@ for (let match = 1; match <= matches; match++) {
     }
   }
   for (const [biome, total] of biomes) {
-    let fragments = match === 1 ? 5 : 2;
-    for (let i = 0; i < pops; i++) fragments += Number(rng() < 0.004);
+    const fragments = fragmentReward(FRAGMENT_DEFAULTS, {
+      layers: pops, first: match === 1, victory: true, raid: false, endlessRounds: 0,
+    }, rng);
     biomes.set(biome, total + fragments);
   }
   if (match === 1 || match % 10 === 0 || match === matches) {

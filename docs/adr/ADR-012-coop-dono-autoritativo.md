@@ -1,6 +1,6 @@
 # ADR-012 — Coop com simulação no navegador do dono e servidor como relay
 
-**Status:** aceito (implementação pendente) · **Data:** 2026-11-17
+**Status:** implementado no servidor local, validação em andamento · **Data:** 2026-11-17
 
 ## Contexto
 Coop precisa de um estado único do jogo. Rodar a simulação no servidor seria o mais seguro, mas exige portar o motor para Node, servidor com CPU por partida e lidar com render separado.

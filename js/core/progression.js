@@ -34,8 +34,7 @@ export function migrateProgress(progress) {
 }
 
 // Normaliza o progresso e remove referências a conteúdo apagado pelo admin.
-export function ensureProgress(acc) {
-  const data = getData();
+export function ensureProgress(acc, data = getData()) {
   acc.progress = migrateProgress(acc.progress);
   const p = acc.progress;
   p.unlocked ??= [];
@@ -44,7 +43,7 @@ export function ensureProgress(acc) {
   p.phases ??= {};
   p.activeAbilities = [0, 1].map((slot) => {
     const uid = p.activeAbilities?.[slot];
-    return uid && instanceItem(acc, uid)?.type === 'habilidade' ? uid : null;
+    return uid && instanceItem(acc, uid, data)?.type === 'habilidade' ? uid : null;
   });
   p.stats = { wins: 0, losses: 0, roundsTotal: 0, ...p.stats };
   p.discoveredEnemies ??= [];
@@ -52,7 +51,7 @@ export function ensureProgress(acc) {
 
   p.unlocked = p.unlocked.filter((id) => byId(data.eskimos, id));
   p.inventory = p.inventory.filter((inst) => byId(data.items, inst.itemId));
-  checkUnlocks(acc);
+  checkUnlocks(acc, data);
 
   for (const id of p.unlocked) {
     const def = byId(data.eskimos, id);
@@ -63,7 +62,7 @@ export function ensureProgress(acc) {
     ep.skills = (ep.skills || []).filter((s) => nodeIds.has(s));
     if (pointsSpent(def, ep) > skillPoints(ep)) ep.skills = [];
     for (const slot of SLOTS) {
-      const item = ep.equip[slot] && instanceItem(acc, ep.equip[slot]);
+      const item = ep.equip[slot] && instanceItem(acc, ep.equip[slot], data);
       if (ep.equip[slot] && (!item || item.type !== slot || !canEquip(item, def))) ep.equip[slot] = null;
     }
   }
@@ -93,9 +92,9 @@ export function unlockText(def) {
   }
 }
 
-export function checkUnlocks(acc) {
+export function checkUnlocks(acc, data = getData()) {
   const fresh = [];
-  for (const def of getData().eskimos) {
+  for (const def of data.eskimos) {
     if (!acc.progress.unlocked.includes(def.id) && unlockMet(def, acc)) {
       acc.progress.unlocked.push(def.id);
       acc.progress.eskimos[def.id] ??= newEskimoProgress();
@@ -118,8 +117,8 @@ export function biomeUnlocked(acc, maps, biomeId) {
   return first >= 0 && phaseUnlocked(acc, first);
 }
 
-export function recruitVariant(account, id) {
-  const def = byId(getData().eskimos, id);
+export function recruitVariant(account, id, { data = getData(), persist = saveAccount } = {}) {
+  const def = byId(data.eskimos, id);
   const unlock = def?.unlock;
   const progress = account.progress;
   if (unlock?.type !== 'fragments' || progress.unlocked.includes(id)) throw new Error('Este esquimó não pode ser recrutado.');
@@ -130,14 +129,14 @@ export function recruitVariant(account, id) {
     unlocked: [...progress.unlocked, id],
     eskimos: { ...progress.eskimos, [id]: newEskimoProgress() },
   };
-  saveAccount({ ...account, progress: next });
+  persist({ ...account, progress: next });
   account.progress = next;
 }
 
 // ---------- Itens ----------
-export function instanceItem(acc, instUid) {
+export function instanceItem(acc, instUid, data = getData()) {
   const inst = acc.progress.inventory.find((i) => i.uid === instUid);
-  return inst ? byId(getData().items, inst.itemId) : null;
+  return inst ? byId(data.items, inst.itemId) : null;
 }
 
 export const canEquip = (item, def) => !item.classRestriction || item.classRestriction === def.classId;
@@ -190,8 +189,7 @@ export function spendRaidKeys(account, raid) {
   account.progress = progress;
 }
 
-export function fuseItems(acc, uids, rng = Math.random) {
-  const data = getData();
+export function fuseItems(acc, uids, rng = Math.random, { data = getData(), persist = saveAccount, origin = 'local' } = {}) {
   const progress = acc.progress;
   const inventory = progress.inventory;
   const selected = new Set(uids);
@@ -214,9 +212,10 @@ export function fuseItems(acc, uids, rng = Math.random) {
     },
   };
   if (result) {
-    next.inventory.push({ uid: uid('it'), itemId: result.id, foundAt: new Date().toISOString(), origin: 'local' });
+    next.inventory.push({ uid: uid('it'), itemId: result.id, foundAt: new Date().toISOString(),
+      origin: ingredients.every((entry) => entry.origin === 'server') ? origin : 'local' });
   }
-  saveAccount({ ...acc, progress: next });
+  persist({ ...acc, progress: next });
   acc.progress = next;
   return result;
 }
@@ -246,22 +245,21 @@ export function layerChain(enemyId, data) {
 }
 
 // ---------- Fim de partida ----------
-export function applyMatchResult(acc, r) {
+export function applyMatchResult(acc, r, { data = getData(), persist = saveAccount, rng = Math.random, origin = 'local' } = {}) {
   const p = acc.progress;
-  const data = getData();
   const first = !p.phases[r.phaseId]?.completed;
   const biome = byId(data.biomes, r.biome);
   p.discoveredEnemies = [...new Set([...p.discoveredEnemies, ...(r.seenEnemies ?? [])])];
   const fragmentSettings = { ...FRAGMENT_DEFAULTS, ...data.economy?.fragments };
   let fragments = 0;
   let fragmentXp = null;
-  if (biome && biome.id !== 'tundra') {
+  if (!r.interrupted && biome && biome.id !== 'tundra') {
     const variants = data.eskimos.filter((def) => def.unlock?.type === 'fragments' && def.unlock.biome === biome.id);
     if (variants.length) {
       fragments = fragmentReward(fragmentSettings, {
         layers: r.layersPopped ?? 0, first, victory: r.victory, raid: r.raid,
         endlessRounds: r.endless ? r.roundsCompleted : 0,
-      });
+      }, rng);
       if (fragments && variants.every((def) => p.unlocked.includes(def.id))) {
         const selected = variants.find((def) => def.id === p.fragmentTargets[biome.id]) ?? variants[0];
         p.eskimos[selected.id].xp += fragments * fragmentSettings.xp;
@@ -272,25 +270,30 @@ export function applyMatchResult(acc, r) {
   }
   const items = [...r.items];
   for (const drops of r.bossDrops ?? []) {
-    const bossLoot = resolveBossLoot(data, p.legendaryPity ?? 0, drops.map((id) => byId(data.items, id)).filter(Boolean));
+    const bossLoot = resolveBossLoot(data, p.legendaryPity ?? 0, drops.map((id) => byId(data.items, id)).filter(Boolean), rng);
     p.legendaryPity = bossLoot.pity;
     if (bossLoot.bonus) items.push(bossLoot.bonus.id);
   }
   const now = new Date().toISOString();
   const gained = items.map((itemId) => {
-    const inst = { uid: uid('it'), itemId, foundAt: now, origin: 'local' };
+    const inst = { uid: uid('it'), itemId, foundAt: now, origin };
     p.inventory.push(inst);
     return inst;
   });
-  p.stats.roundsTotal += r.roundsCompleted;
-  if (r.endless) {
+  if (!r.interrupted) p.stats.roundsTotal += r.roundsCompleted;
+  if (r.interrupted) {
+    // O inventário é salvo. Uma interrupção da sala não conta como derrota.
+  } else if (r.endless) {
     p.raidKeys = Math.min(economy(data).raidKeyCap, (p.raidKeys ?? 0) + Math.floor(r.roundsCompleted / 15));
     const record = { melhorWave: r.roundsCompleted, data: now, duracaoSeg: r.duration,
-      esquadrao: [...r.usedEskimos], seed: r.endless, modo: 'solo' };
-    if (r.roundsCompleted > (p.endlessBest?.melhorWave ?? 0)) p.endlessBest = record;
+      esquadrao: [...r.usedEskimos], seed: r.endless, modo: r.coop ? 'coop' : 'solo',
+      ...(r.coop ? { equipe: r.coop } : {}) };
+    const best = r.coop ? 'endlessCoopBest' : 'endlessBest';
+    const byBiome = r.coop ? 'endlessCoopByBiome' : 'endlessByBiome';
+    if (r.roundsCompleted > (p[best]?.melhorWave ?? 0)) p[best] = record;
     const mapBiome = biome?.id ?? 'tundra';
-    p.endlessByBiome ??= {};
-    if (r.roundsCompleted > (p.endlessByBiome[mapBiome]?.melhorWave ?? 0)) p.endlessByBiome[mapBiome] = record;
+    p[byBiome] ??= {};
+    if (r.roundsCompleted > (p[byBiome][mapBiome]?.melhorWave ?? 0)) p[byBiome][mapBiome] = record;
   } else if (r.raid) {
     p.raids ??= {};
     const raid = (p.raids[r.raid] ??= { wins: 0, losses: 0 });
@@ -307,7 +310,7 @@ export function applyMatchResult(acc, r) {
     if (rarity) p.lastMatchDrops[rarity] = (p.lastMatchDrops[rarity] ?? 0) + 1;
   }
 
-  const xp = r.roundsCompleted * 10 + (r.victory ? 50 : 0);
+  const xp = r.interrupted ? 0 : r.roundsCompleted * 10 + (r.victory ? 50 : 0);
   const levelUps = [];
   for (const id of new Set(r.usedEskimos)) {
     const ep = p.eskimos[id];
@@ -316,7 +319,7 @@ export function applyMatchResult(acc, r) {
     ep.xp += xp;
     if (skillPoints(ep) > before) levelUps.push(id);
   }
-  const newUnlocks = checkUnlocks(acc);
-  saveAccount(acc);
+  const newUnlocks = checkUnlocks(acc, data);
+  persist(acc);
   return { gained, xp, levelUps, newUnlocks, fragments, fragmentXp, biome };
 }
