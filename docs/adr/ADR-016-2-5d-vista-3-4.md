@@ -1,6 +1,6 @@
 # ADR-016 — 2.5D em vista 3/4 com inclinação 0,95
 
-**Status:** aceito (implementação pendente) · **Data:** 2026-11-17
+**Status:** implementado na arena e no criador visual · **Data:** 2026-11-17
 
 ## Contexto
 Igor pediu visual 2.5D. Prévia aprovada em `preview/25d.html`, escolhendo inclinação 0,95.

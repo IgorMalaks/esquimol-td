@@ -3,13 +3,14 @@ import { go } from '../core/router.js';
 import { login, register, adminConfigured, adminSetup, adminLogin } from '../core/auth.js';
 import { getData } from '../data/gameData.js';
 import { eskimoCanvas, faceCanvas } from '../render/faceRenderer.js';
+import { preferencesButton } from '../core/preferences.js';
 
 function hero() {
   const data = getData();
   return el('div', { class: 'hero' },
     el('div', { class: 'hero-row' },
       data.eskimos.slice(0, 2).map((e) => eskimoCanvas(e, 72)),
-      el('h1', { class: 'logo' }, 'Esquimó', el('span', { text: 'TD' })),
+      el('h1', { class: 'logo ds-logo' }, 'Esquimó', el('span', { text: 'TD' })),
       data.enemies.slice(0, 2).map((e) => faceCanvas(e.face, 64))),
     el('p', { class: 'tagline', text: 'Defenda a vila do gelo contra as carinhas invasoras!' }));
 }
@@ -25,7 +26,7 @@ export function loginScreen(root) {
   const pass = el('input', { type: 'password', name: 'password', autocomplete: 'current-password', required: true, placeholder: '••••••' });
   const pass2 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: 'repita a senha' });
   const confirmField = el('label', { class: 'field hidden' }, el('span', { text: 'Confirmar senha' }), pass2);
-  const submit = el('button', { type: 'submit', class: 'btn btn-primary btn-big', text: 'Entrar' });
+  const submit = el('button', { type: 'submit', class: 'btn btn-primary btn-big ds-btn ds-btn--primary ds-btn--lg ds-btn--block', text: 'Entrar' });
   const tabs = ['login', 'register'].map((m) => el('button', {
     type: 'button', class: `tab ${m === mode ? 'active' : ''}`, text: m === 'login' ? 'Entrar' : 'Registrar',
     onclick: () => setMode(m),
@@ -40,7 +41,7 @@ export function loginScreen(root) {
   }
 
   const form = el('form', {
-    class: 'card auth-card',
+    class: 'card auth-card ds-card',
     onsubmit: (e) => {
       e.preventDefault();
       withBusy(submit, async () => {
@@ -62,7 +63,7 @@ export function loginScreen(root) {
   submit);
 
   root.append(el('main', { class: 'screen screen-auth' },
-    hero(), form,
+    hero(), form, preferencesButton(),
     el('a', { href: '#', class: 'admin-link', text: 'Painel Admin', onclick: (e) => { e.preventDefault(); go('adminLogin'); } })));
   user.focus();
 }

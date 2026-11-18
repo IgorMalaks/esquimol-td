@@ -1,6 +1,6 @@
 # SPEC-010 — Raridades, garantia de Lendário, fusão e economia de drops
 
-**Status:** planejado (T1.4–T1.7) · **ADR:** 014, 013 (após servidor)
+**Status:** implementado no solo (T1.4–T1.7) · **ADR:** 014, 013 (após servidor)
 
 ## Raridades
 | Raridade | Cor | Peso padrão (tabela normal) | Funde para cima? | Negociável? |

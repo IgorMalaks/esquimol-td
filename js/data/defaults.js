@@ -2,6 +2,7 @@
 // este arquivo só é usado na primeira execução ou em "Restaurar padrões".
 import { migrateData } from './migrations.js';
 import { ABILITY_TYPES } from '../game/abilities.js';
+import { addBiomeContent } from './biomeContent.js';
 export { DATA_VERSION } from './migrations.js';
 
 // Classes = comportamento (código). Esquimós = instâncias (dados) — ver ADR-007.
@@ -206,7 +207,7 @@ function phases() {
 }
 
 export function createDefaultData() {
-  return migrateData({
+  return addBiomeContent(migrateData({
     version: 1, eskimos: eskimos(), enemies: enemies(), items: items(), maps: maps(), phases: phases(),
     abilities: Object.entries(ABILITY_TYPES).map(([type, details]) => ({ id: type, type, name: details.name })),
     raids: [{
@@ -219,5 +220,5 @@ export function createDefaultData() {
         { hp: 0.33, speedMultiplier: 1.25, escortId: 'pedra', escortCount: 2 }],
       bossLoot: { source: 'raidBoss', rolls: 2 },
     }],
-  });
+  }));
 }

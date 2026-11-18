@@ -1,6 +1,6 @@
 # SPEC-012 — Modo Raide e chaves
 
-**Status:** planejado (T1.10, T3.4) · **ADR:** 014, 013
+**Status:** implementado no solo (T1.10); coop planejado (T3.4) · **ADR:** 014, 013
 
 ## Chaves de raide
 - **R1** Moeda `raidKeys` por conta, limite de **5** (editável).

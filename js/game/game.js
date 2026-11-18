@@ -10,6 +10,8 @@ import { canHitEnemy, hasTrait } from './enemies.js';
 import { endlessEnemies, endlessGold, endlessRound } from './endless.js';
 import { ALLY_DEFAULTS, applyAuras, summonerStats, supportStats } from './roles.js';
 import { SpatialGrid } from './spatialGrid.js';
+import { damageFeedback, damageMultiplier, ELEMENT_LABELS } from './elements.js';
+import { inLight } from '../data/biomes.js';
 import { seededRandom } from '../core/utils.js';
 
 export const WORLD = { W: 1000, H: 600 };
@@ -31,8 +33,8 @@ const ALLY_FACES = {
   foca: { shape: 'oval', skin: '#8db2c3', eyes: 'felizes', mouth: 'sorriso', headwear: 'nenhum', accessory: 'bigode' },
 };
 
-export const TARGET_MODES = ['primeiro', 'ultimo', 'forte', 'perto'];
-export const TARGET_LABEL = { primeiro: 'Primeiro', ultimo: 'Último', forte: 'Mais forte', perto: 'Mais perto' };
+export const TARGET_MODES = ['primeiro', 'ultimo', 'forte', 'perto', 'eficaz'];
+export const TARGET_LABEL = { primeiro: 'Primeiro', ultimo: 'Último', forte: 'Mais forte', perto: 'Mais perto', eficaz: 'Eficaz' };
 
 const dist2 = (ax, ay, bx, by) => (ax - bx) ** 2 + (ay - by) ** 2;
 
@@ -48,6 +50,9 @@ export class Game {
     this.data = data;
     this.phase = phase;
     this.map = map;
+    this.biome = data.biomes.find((biome) => biome.id === map.biome);
+    this.layersPopped = 0;
+    this.weatherTimer = 30;
     this.roster = roster;
     this.cb = callbacks;
     this.path = new Path(map.points.map(([x, y]) => ({ x: x * WORLD.W, y: y * WORLD.H })));
@@ -59,6 +64,8 @@ export class Game {
     this.rbeMemo = Object.create(null);
     this.canHitAir = roster.some((entry) => computeStats(entry.def, entry).hitsAir);
     this.bossDrops = [];
+    this.raidReward = null;
+    this.seenEnemies = new Set();
     this.preparation = null;
     this.abilities = abilities.map((ability) => ability && { ...ability, remaining: ability.cooldown / 2 });
     this.abilityTarget = null;
@@ -133,6 +140,14 @@ export class Game {
 
   update(dt) {
     this.simTime += dt;
+    if (this.biome?.effect === 'vento' && this.simTime >= this.weatherTimer) {
+      this.weatherTimer += 30;
+      const tower = this.towers[Math.floor(Math.random() * this.towers.length)];
+      if (tower) {
+        tower.stunnedUntil = this.simTime + 2;
+        this.effects.push({ type: 'ring', x: tower.x, y: tower.y, r: 45, color: '#7d88ff', t: 0, dur: 0.7 });
+      }
+    }
     if (this.preparation !== null) {
       this.preparation = Math.max(0, this.preparation - dt);
       if (this.preparation === 0) {
@@ -193,11 +208,12 @@ export class Game {
     this.spawnQueue = queue.sort((a, b) => a.t - b.t);
     this.roundTime = 0;
     this.roundActive = true;
+    this.cb.onAction?.('round');
   }
 
   nextRound() {
     return this.phase.endless
-      ? endlessRound(this.data, this.round + 1, this.phase.endless, this.canHitAir)
+      ? endlessRound(this.data, this.round + 1, this.phase.endless, this.canHitAir, this.biome?.weights)
       : this.phase.rounds[this.round];
   }
 
@@ -224,12 +240,18 @@ export class Game {
     if (victory) {
       for (const d of this.drops) if (d.type === 'chest') this.loot.push(...this._openChest(d.source));
       this.drops = this.drops.filter((d) => d.type !== 'chest');
+      if (this.raidReward) {
+        this.loot.push(...this.raidReward);
+        this.bossDrops.push(this.raidReward);
+      }
     }
     this.cb.onEnd?.({
       victory, phaseId: this.phase.id, roundsCompleted: this.round,
       items: [...this.loot], usedEskimos: [...this.used],
       endless: this.phase.endless, duration: Math.floor(this.simTime), bossDrops: this.bossDrops,
       raid: this.phase.raid && this.raidStarted ? this.phase.raid.id : null,
+      seenEnemies: [...this.seenEnemies],
+      biome: this.biome?.id, layersPopped: this.layersPopped,
     });
   }
 
@@ -239,12 +261,14 @@ export class Game {
     const p = path.pointAt(dist);
     const e = {
       id: ++this.seq, def, path, dist, x: p.x, y: p.y, r: Number(def.size) || 15,
-      hp: Math.max(1, Number(def.hp) || 1), alive: true, slowPct: 0, slowTimer: 0, phase: Math.random() * 6,
+      hp: Math.max(0.1, Number(def.hp) || 1), alive: true, slowPct: 0, slowTimer: 0, phase: Math.random() * 6,
+      lastHit: this.simTime, healAt: this.simTime + 4, shield: hasTrait(def, 'escudo') ? 6 : 0,
     };
     if (this.phase.raid && def.id === this.phase.raid.bossId && this.round >= this.phase.raid.farmRounds.length) {
       e.raidBoss = { timer: this.phase.raid.bossAbility.interval, stage: 0, speed: 1 };
     }
     this.enemies.push(e);
+    this.seenEnemies.add(def.id);
     this.enemyGrid.add(e);
     return e;
   }
@@ -252,10 +276,23 @@ export class Game {
   _updateEnemy(e, dt) {
     if (!e.alive) return;
     if (e.slowTimer > 0) { e.slowTimer -= dt; if (e.slowTimer <= 0) e.slowPct = 0; }
+    if (hasTrait(e.def, 'regenera') && this.simTime - e.lastHit >= 3) e.hp = e.def.hp;
+    if (hasTrait(e.def, 'curandeiro') && this.simTime >= e.healAt) {
+      e.healAt += 4;
+      for (const other of this.enemies) {
+        if (other.alive && other !== e && dist2(e.x, e.y, other.x, other.y) <= 80 ** 2) {
+          other.hp = Math.min(other.def.hp, other.hp + 1);
+        }
+      }
+    }
     if (e.raidBoss) this._updateRaidBoss(e, dt);
-    e.dist += Number(e.def.speed) * (e.raidBoss?.speed ?? 1) * (1 - e.slowPct) * dt;
+    const exposed = (this.biome?.effect === 'vento' && hasTrait(e.def, 'aereo')) ||
+      (this.biome?.effect === 'calor' && e.def.element === 'fogo' && inLight(this.map, e.x, e.y));
+    e.dist += Number(e.def.speed) * (e.raidBoss?.speed ?? 1) * (hasTrait(e.def, 'rapido') ? 1.8 : 1) *
+      (exposed ? 1.2 : 1) * (1 - e.slowPct) * dt;
     if (e.dist >= e.path.length) {
       e.alive = false;
+      if (hasTrait(e.def, 'ladrao')) this.gold = Math.max(0, this.gold - Math.ceil(this.gold * 0.05));
       this.lives -= rbe(e.def.id, this.roundData, this.rbeMemo);
       if (this.lives <= 0 || e.raidBoss) { this.lives = Math.max(0, this.lives); this.end(false); }
       return;
@@ -265,20 +302,40 @@ export class Game {
   }
 
   hitEnemy(e, dmg, p) {
-    if (!e.alive || (p && !canHitEnemy(e.def, p.hitsAir))) return;
-    if (p?.slowPct > 0) {
+    if (!e.alive || (p && !canHitEnemy(e.def, p.hitsAir, p.detection))) return;
+    if (e.shield > 0 && Number.isFinite(p?.x) && Number.isFinite(p?.y)) {
+      const before = e.path.pointAt(Math.max(0, e.dist - 1));
+      const after = e.path.pointAt(e.dist + 1);
+      if ((p.x - e.x) * (after.x - before.x) + (p.y - e.y) * (after.y - before.y) > 0) {
+        e.shield--;
+        return;
+      }
+    }
+    const elementMultiplier = damageMultiplier(this.data, e.def, p?.damageType);
+    const multiplier = elementMultiplier * (hasTrait(e.def, 'blindado') && dmg < 2 ? 0.25 : 1);
+    const feedback = damageFeedback(multiplier);
+    if (feedback) this.effects.push({ type: 'text', x: e.x, y: e.y, text: feedback, t: 0, dur: 0.65 });
+    if (!multiplier) return;
+    if (p?.slowPct > 0 && !hasTrait(e.def, 'imune_gelo')) {
       const factor = hasTrait(e.def, 'chefe') ? 0.5 : 1;
-      e.slowPct = Math.max(e.slowPct, Math.min(0.8, p.slowPct / 100) * factor);
+      const heat = this.biome?.effect === 'calor' ? 0.7 : 1;
+      e.slowPct = Math.max(e.slowPct, Math.min(0.8, p.slowPct / 100) * factor * heat);
       e.slowTimer = Math.max(e.slowTimer, p.slowDur);
     }
-    e.hp -= dmg;
+    e.lastHit = this.simTime;
+    e.hp -= dmg * multiplier;
     if (e.raidBoss && e.hp > 0) this._triggerRaidStages(e);
-    if (e.hp <= 0) this._popEnemy(e, -e.hp, p);
+    if (e.hp <= 0) this._popEnemy(e, -e.hp / multiplier, p);
   }
 
   // Camadas estilo Bloons: ao morrer, vira N inimigos da camada anterior; dano excedente passa adiante.
   _popEnemy(e, overflow, p) {
     e.alive = false;
+    this.layersPopped++;
+    if (!this.practiceDrop && this.cb.needsPracticeDrop?.()) {
+      this.practiceDrop = true;
+      this.drops.push({ id: ++this.seq, type: 'practice', x: e.x, y: e.y, t: 0, life: Infinity });
+    }
     const raid = this.phase.raid;
     const inFarm = raid && this.round < raid.farmRounds.length;
     const boost = this.goldBoost?.until > this.simTime ? this.goldBoost.multiplier : 1;
@@ -293,15 +350,18 @@ export class Game {
         const reward = rollItem(this.data, Math.random, source);
         if (reward) drops.push(reward.id);
       }
-      this.loot.push(...drops);
-      this.bossDrops.push(drops);
+      if (e.raidBoss) this.raidReward = drops;
+      else {
+        this.loot.push(...drops);
+        this.bossDrops.push(drops);
+      }
     } else {
       this._maybeDrop(e);
     }
     const child = e.def.childId && this.enemyDefs.get(e.def.childId);
     if (!child) return;
     const children = [];
-    const n = Math.max(1, Number(e.def.childCount) || 1);
+    const n = Math.max(1, Number(e.def.childCount) || 1) * (hasTrait(e.def, 'divisor') ? 2 : 1);
     for (let i = 0; i < n; i++) {
       const childPath = hasTrait(child, 'aereo') ? this.flightPath : this.path;
       const distance = childPath === e.path ? e.dist : e.dist * childPath.length / e.path.length;
@@ -310,7 +370,9 @@ export class Game {
       p?.hit?.add(c.id);
       children.push(c);
     }
-    if (overflow > 0 && canHitEnemy(child, p?.hitsAir)) this.hitEnemy(children[0], overflow, p && { hitsAir: p.hitsAir });
+    if (overflow > 0 && canHitEnemy(child, p?.hitsAir, p?.detection)) {
+      this.hitEnemy(children[0], overflow, p && { hitsAir: p.hitsAir, detection: p.detection, damageType: p.damageType });
+    }
   }
 
   // ---------- Drops ----------
@@ -340,6 +402,8 @@ export class Game {
 
   _collectDrop(d) {
     d.dead = true;
+    this.cb.onAction?.('drop');
+    if (d.type === 'practice') return;
     const ids = d.type === 'chest' ? this._openChest(d.source) : [d.itemId];
     this.loot.push(...ids);
     const names = ids.map((id) => this.data.items.find((i) => i.id === id)?.name).filter(Boolean).join(', ');
@@ -365,7 +429,11 @@ export class Game {
   }
 
   refreshTowerStats() {
-    for (const tower of this.towers) tower.stats = this.towerStats(tower);
+    for (const tower of this.towers) {
+      tower.stats = this.towerStats(tower);
+      if (this.biome?.effect === 'neblina') tower.stats.range *= 0.9;
+      if (this.biome?.effect === 'escuridao' && !inLight(this.map, tower.x, tower.y)) tower.stats.range *= 0.85;
+    }
     const supports = this.towers.filter((tower) => tower.stats.buffs);
     for (const tower of this.towers) if (!tower.stats.buffs) applyAuras(tower, supports);
   }
@@ -373,6 +441,7 @@ export class Game {
   canPlace(x, y) {
     if (x < TOWER_R || y < TOWER_R || x > WORLD.W - TOWER_R || y > WORLD.H - TOWER_R) return false;
     if (this.path.distanceTo(x, y) < PATH_W / 2 + TOWER_R - 4) return false;
+    if (this.map.obstacles?.some(([ox, oy, radius]) => dist2(x, y, ox, oy) < (radius + TOWER_R) ** 2)) return false;
     return !this.towers.some((t) => dist2(t.x, t.y, x, y) < (TOWER_R * 2 - 4) ** 2);
   }
 
@@ -390,6 +459,7 @@ export class Game {
     this.refreshTowerStats();
     this.gold -= cost;
     this.used.add(entry.def.id);
+    this.cb.onAction?.('place');
     this.effects.push({ type: 'ring', x, y, r: 28, color: '#ffffff', t: 0, dur: 0.35 });
     return true;
   }
@@ -403,6 +473,7 @@ export class Game {
     t.invested += cost;
     t.upgrades[track]++;
     this.refreshTowerStats();
+    this.cb.onAction?.('upgrade');
     return true;
   }
 
@@ -438,13 +509,15 @@ export class Game {
     let best = null;
     let bestScore = -Infinity;
     for (const e of this.enemyGrid.near(t.x, t.y, r)) {
-      if (!e.alive || !canHitEnemy(e.def, t.stats.hitsAir) || dist2(t.x, t.y, e.x, e.y) > (r + e.r) ** 2) continue;
+      if (!e.alive || !canHitEnemy(e.def, t.stats.hitsAir, t.stats.detection) ||
+          dist2(t.x, t.y, e.x, e.y) > (r + e.r) ** 2) continue;
       const progress = e.dist / e.path.length;
       let score;
       switch (t.targetMode) {
         case 'ultimo': score = -progress; break;
         case 'forte': score = rbe(e.def.id, this.roundData, this.rbeMemo) * 2 + progress; break;
         case 'perto': score = -dist2(t.x, t.y, e.x, e.y); break;
+        case 'eficaz': score = damageMultiplier(this.data, e.def, t.stats.damageType) * 2 + progress; break;
         default: score = progress;
       }
       if (!best || score > bestScore || (score === bestScore && e.id < best.id)) { bestScore = score; best = e; }
@@ -477,7 +550,7 @@ export class Game {
         id: ++this.seq, kind, tower: t,
         x: t.x + Math.cos(a) * TOWER_R, y: t.y + Math.sin(a) * TOWER_R,
         vx: Math.cos(a) * s.projectileSpeed, vy: Math.sin(a) * s.projectileSpeed, angle: a,
-        life: flightTime, flightTime, hitsAir: s.hitsAir,
+        life: flightTime, flightTime, hitsAir: s.hitsAir, detection: s.detection, damageType: s.damageType,
         damage: s.damage, pierce: s.pierce, splash: s.splash, slowPct: s.slowPct, slowDur: s.slowDuration,
         hit: new Set(), r: kind === 'bola' ? 8 : 6,
       });
@@ -490,7 +563,7 @@ export class Game {
     if (p.life <= 0 || p.x < -30 || p.y < -30 || p.x > WORLD.W + 30 || p.y > WORLD.H + 30) { p.dead = true; return; }
     const nearby = [...this.enemyGrid.near(p.x, p.y, p.r)].sort((a, b) => a.id - b.id);
     for (const e of nearby) {
-      if (!e.alive || p.hit.has(e.id) || !canHitEnemy(e.def, p.hitsAir)) continue;
+      if (!e.alive || p.hit.has(e.id) || !canHitEnemy(e.def, p.hitsAir, p.detection)) continue;
       if (dist2(p.x, p.y, e.x, e.y) > (e.r + p.r) ** 2) continue;
       if (p.splash > 0) { this._explode(p, e.x, e.y); p.dead = true; return; }
       p.hit.add(e.id);
@@ -501,7 +574,7 @@ export class Game {
 
   _explode(p, x, y) {
     const targets = [...this.enemyGrid.near(x, y, p.splash)].filter((e) =>
-      e.alive && canHitEnemy(e.def, p.hitsAir) && dist2(x, y, e.x, e.y) <= (p.splash + e.r) ** 2);
+      e.alive && canHitEnemy(e.def, p.hitsAir, p.detection) && dist2(x, y, e.x, e.y) <= (p.splash + e.r) ** 2);
     for (const e of targets) { p.hit.add(e.id); this.hitEnemy(e, p.damage, p); }
     this.effects.push({ type: 'ring', x, y, r: p.splash, color: p.kind === 'gelo' ? '#7efcff' : '#ffffff', t: 0, dur: 0.3 });
   }
@@ -534,7 +607,7 @@ export class Game {
           dist2(ally.x, ally.y, enemy.x, enemy.y) > (ally.r + enemy.r) ** 2) continue;
       ally.contacts.set(enemy.id, this.simTime + 0.25);
       this.hitEnemy(enemy, ally.stats.allyDamage, {
-        tower: ally.tower, hitsAir: false, slowPct: ally.stats.allySlowPct, slowDur: 1,
+        tower: ally.tower, hitsAir: false, damageType: 'impacto', slowPct: ally.stats.allySlowPct, slowDur: 1,
       });
       if (--ally.hp <= 0) { this._expireAlly(ally); return; }
     }
@@ -544,7 +617,7 @@ export class Game {
     ally.dead = true;
     if (!ally.stats.allyExplode) return;
     this._explode({ tower: ally.tower, splash: ally.stats.allyExplode, hitsAir: false,
-      damage: ally.stats.allyDamage, hit: new Set() }, ally.x, ally.y);
+      damage: ally.stats.allyDamage, damageType: 'gelo', hit: new Set() }, ally.x, ally.y);
   }
 
   _updateRaidBoss(enemy, dt) {
@@ -712,7 +785,7 @@ export class Game {
         const distance = this.path.distanceAlong(x, y);
         for (const enemy of [...this.enemies]) {
           if (enemy.path === this.path && Math.abs(enemy.dist - distance) <= ability.area / 2) {
-            this.hitEnemy(enemy, ability.power, { hitsAir: true });
+            this.hitEnemy(enemy, ability.power, { hitsAir: true, detection: true, damageType: 'impacto' });
           }
         }
         this.effects.push(mark);
@@ -721,7 +794,8 @@ export class Game {
       case 'nevasca':
       case 'bloco_gelo':
         for (const enemy of this.enemies) {
-          if (ability.target === 'global' || dist2(x, y, enemy.x, enemy.y) <= ability.area ** 2) {
+          if (!hasTrait(enemy.def, 'imune_gelo') &&
+              (ability.target === 'global' || dist2(x, y, enemy.x, enemy.y) <= ability.area ** 2)) {
             const resistance = hasTrait(enemy.def, 'chefe') ? 0.5 : 1;
             const limit = ability.type === 'bloco_gelo' ? 1 : 0.8;
             enemy.slowPct = Math.max(enemy.slowPct, Math.min(limit, ability.power / 100) * resistance);
@@ -742,13 +816,15 @@ export class Game {
   }
 
   _updateAbilities(dt) {
-    const cooldownPct = this.towers.reduce((max, tower) => Math.max(max, tower.stats.cooldownPct ?? 0), 0);
+    const cooldownPct = this.towers.reduce((max, tower) => Math.max(max, tower.stats.cooldownPct ?? 0), 0) +
+      (this.biome?.effect === 'aurora' ? 15 : 0);
     for (const ability of this.abilities) {
       if (ability) ability.remaining = Math.max(0, ability.remaining - dt / Math.max(0.1, 1 - cooldownPct / 100));
     }
     this.abilityBursts = this.abilityBursts.filter((burst) => {
       if (burst.when > this.simTime) return true;
-      this._explode({ splash: burst.area, damage: burst.power, hitsAir: true, hit: new Set() }, burst.x, burst.y);
+      this._explode({ splash: burst.area, damage: burst.power, hitsAir: true, detection: true,
+        damageType: 'perfurante', hit: new Set() }, burst.x, burst.y);
       return false;
     });
   }
@@ -777,8 +853,9 @@ export class Game {
     const g = c.getContext('2d');
     g.setTransform(this.px, 0, 0, this.px, 0, 0);
     const grad = g.createLinearGradient(0, 0, 0, WORLD.H);
-    grad.addColorStop(0, '#f4fbff');
-    grad.addColorStop(1, '#d9eefc');
+    const palette = this.biome?.palette;
+    grad.addColorStop(0, palette?.ground ?? '#f4fbff');
+    grad.addColorStop(1, palette?.path ?? '#d9eefc');
     g.fillStyle = grad;
     g.fillRect(0, 0, WORLD.W, WORLD.H);
     g.translate(0, GROUND_TOP);
@@ -798,7 +875,7 @@ export class Game {
       const s = 12 + rnd() * 10;
       g.fillStyle = 'rgba(0,40,80,0.15)';
       g.beginPath(); g.ellipse(x, y + s * 0.9, s * 0.7, s * 0.25, 0, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#2e8b57'; g.strokeStyle = '#1b4d33'; g.lineWidth = 2;
+      g.fillStyle = palette?.trees ?? '#2e8b57'; g.strokeStyle = '#1b4d33'; g.lineWidth = 2;
       for (let k = 0; k < 3; k++) {
         const yy = y - k * s * 0.55;
         const w = s * (1 - k * 0.22);
@@ -806,7 +883,7 @@ export class Game {
         g.fill(); g.stroke();
         g.fillStyle = '#ffffff';
         g.beginPath(); g.moveTo(x, yy - s * 0.9); g.lineTo(x + w * 0.25, yy - s * 0.5); g.lineTo(x - w * 0.25, yy - s * 0.5); g.closePath(); g.fill();
-        g.fillStyle = '#2e8b57';
+        g.fillStyle = palette?.trees ?? '#2e8b57';
       }
     }
 
@@ -815,11 +892,21 @@ export class Game {
       g.lineWidth = w; g.strokeStyle = color; g.lineJoin = 'round'; g.lineCap = 'round';
       g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y))); g.stroke();
     };
-    stroke(PATH_W + 8, '#6fa8d6');
-    stroke(PATH_W, '#bfe0f7');
+    stroke(PATH_W + 8, palette?.edge ?? '#6fa8d6');
+    stroke(PATH_W, palette?.path ?? '#bfe0f7');
     g.setLineDash([10, 14]);
     stroke(4, 'rgba(255,255,255,0.8)');
     g.setLineDash([]);
+    for (const [x, y, radius] of this.map.lights ?? []) {
+      const glow = g.createRadialGradient(x, y, 3, x, y, radius);
+      glow.addColorStop(0, 'rgba(218,250,255,.9)');
+      glow.addColorStop(1, 'rgba(198,232,255,0)');
+      g.fillStyle = glow; g.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
+    for (const [x, y, radius] of this.map.obstacles ?? []) {
+      g.fillStyle = palette?.trees ?? '#245846'; g.strokeStyle = '#1b463d'; g.lineWidth = 3;
+      g.beginPath(); g.ellipse(x, y, radius, radius * 0.7, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    }
     return c;
   }
 
@@ -850,6 +937,14 @@ export class Game {
 
     for (const fx of this.effects) {
       const k = fx.t / fx.dur;
+      if (fx.type === 'text') {
+        ctx.globalAlpha = 1 - k;
+        ctx.fillStyle = fx.text === 'EFICAZ' ? '#70420b' : '#223654';
+        ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(fx.text, fx.x, projectY(fx.y, 24 + 22 * k));
+        ctx.globalAlpha = 1;
+        continue;
+      }
       const y = projectY(fx.y, fx.type === 'pop' ? fx.r * 0.45 : 0);
       ctx.globalAlpha = 1 - k;
       ctx.strokeStyle = fx.color;
@@ -888,6 +983,8 @@ export class Game {
       const altitude = hasTrait(e.def, 'aereo') ? 60 : 0;
       const x = e.x + (altitude ? Math.sin(this.time * 3 + e.phase) * 4 : 0);
       const y = ground - altitude - e.r * 0.55 + Math.sin(this.time * 8 + e.phase) * 1.5;
+      ctx.save();
+      if (hasTrait(e.def, 'camuflado')) ctx.globalAlpha = 0.45;
       ctx.fillStyle = 'rgba(0,40,80,0.18)';
       ctx.beginPath(); ctx.ellipse(e.x, ground, e.r * 0.8, e.r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
       drawFaceCached(ctx, e.def.face, x, y, e.r, this.px);
@@ -900,6 +997,15 @@ export class Game {
         ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(e.x - w / 2, y - e.r - 10, w, 4);
         ctx.fillStyle = '#2ed573'; ctx.fillRect(e.x - w / 2, y - e.r - 10, w * (e.hp / e.def.hp), 4);
       }
+      if (e.def.element && e.def.element !== 'neutro') {
+        ctx.fillStyle = '#10233a'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(ELEMENT_LABELS[e.def.element] ?? '', x, y + e.r + 10);
+      }
+      if (e.shield > 0) {
+        ctx.strokeStyle = '#4d79d5'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, e.r + 2, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
   }
 
   _drawTower(ctx, t) {
@@ -938,7 +1044,7 @@ export class Game {
     ctx.save();
     ctx.shadowColor = glow; ctx.shadowBlur = 16;
     const y = projectY(d.y, 10) + bob;
-    if (d.type === 'chest') drawChest(ctx, d.x, y, 13);
+    if (d.type === 'chest' || d.type === 'practice') drawChest(ctx, d.x, y, 13);
     else if (item) drawItemIcon(ctx, item, d.x, y, 12);
     ctx.restore();
   }

@@ -1,6 +1,6 @@
 # SPEC-018 — Desbloqueio de esquimós: marcos e fragmentos de bioma
 
-**Status:** planejado (T1.17) · **Relacionadas:** SPEC-004, SPEC-008, SPEC-010, SPEC-017 · **ADR:** 013 (após servidor)
+**Status:** recrutamento solo disponível (T1.17 em andamento) · **Relacionadas:** SPEC-004, SPEC-008, SPEC-010, SPEC-017 · **ADR:** 013 (após servidor)
 
 ## Decisão do Igor (2026-11-17)
 Esquimós novos vêm de **fragmentos do bioma correspondente**. Classes base continuam por **marcos** (todo jogador precisa montar um esquadrão sem depender de sorte); as **variantes elementais** de cada bioma saem por fragmentos.

@@ -1,6 +1,6 @@
 # ADR-018 — Design system: visual cartoon original + filtro quente
 
-**Status:** aceito (aplicação no jogo pendente, T1.18) · **Data:** 2026-11-17
+**Status:** aplicação em andamento (T1.18) · **Data:** 2026-11-17
 
 ## Contexto
 O CSS do jogo (`main.css`) cresceu sem tokens. Foram feitas duas propostas: v0.1 (cartoon, gelo + tinta + dourado) e v0.2 "Maduro" (tons frios dessaturados, fonte reta). Igor achou a v0.1 um pouco infantil, testou a v0.2 e preferiu **manter a v0.1 com um filtro amarelo leve** para cansar menos a vista.

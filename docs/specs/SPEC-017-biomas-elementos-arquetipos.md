@@ -1,6 +1,6 @@
 # SPEC-017 — Biomas, elementos e arquétipos de inimigos
 
-**Status:** planejado (T1.13–T1.16) · **ADR:** 017 · **Relacionadas:** SPEC-009 (traits), SPEC-012 (raide), SPEC-013 (infinito)
+**Status:** em andamento (T1.13–T1.16) · **ADR:** 017 · **Relacionadas:** SPEC-009 (traits), SPEC-012 (raide), SPEC-013 (infinito)
 
 ## 1. Elementos
 

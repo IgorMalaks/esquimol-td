@@ -1,6 +1,6 @@
 # SPEC-011 — Habilidades ativas (drop com raridade)
 
-**Status:** planejado (T1.8) · **ADR:** 015
+**Status:** implementado no solo (T1.8) · **ADR:** 015
 
 ## Conceito
 Habilidade ativa é um **item** do tipo `habilidade` que cai como qualquer drop e pode ter qualquer raridade. O jogador equipa até **2** no próprio perfil (não em esquimó) e usa na partida por botões na HUD, com tempo de recarga.

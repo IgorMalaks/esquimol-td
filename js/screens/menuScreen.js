@@ -5,17 +5,20 @@ import { currentAccount, logout, saveAccount } from '../core/auth.js';
 import { getData, byId } from '../data/gameData.js';
 import { CLASSES, ITEM_TYPES, RARITIES } from '../data/defaults.js';
 import {
-  ensureProgress, phaseUnlocked, unlockText, equippedItems, instanceItem, whoEquips,
+  ensureProgress, phaseUnlocked, biomeUnlocked, recruitVariant, unlockText, equippedItems, instanceItem, whoEquips,
   canEquip, equip, unequip, fuseItems, setAbilitySlot, SLOTS,
 } from '../core/progression.js';
 import {
   computeStats, skillPoints, pointsFree, canLearn, canUnlearn, effectText, itemStatsText,
   STAT_LABELS, XP_PER_POINT, MAX_POINTS,
 } from '../game/stats.js';
-import { eskimoCanvas, itemCanvas } from '../render/faceRenderer.js';
+import { eskimoCanvas, itemCanvas, faceCanvas } from '../render/faceRenderer.js';
 import { economy, fusionPool } from '../game/economy.js';
 import { raidAvailable } from '../game/raids.js';
 import { abilityStats } from '../game/abilities.js';
+import { DAMAGE_LABELS, ELEMENT_LABELS, damageMultiplier } from '../game/elements.js';
+import { ENEMY_TRAITS } from '../game/enemies.js';
+import { preferencesButton } from '../core/preferences.js';
 
 const fmt = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2));
 
@@ -29,12 +32,13 @@ export function menuScreen(root, params = {}) {
   let selectedEskimo = params.eskimo || acc.progress.unlocked[0];
   const content = el('div', { class: 'menu-content' });
 
-  const tabBtns = [['fases', 'Fases'], ['quartel', 'Quartel'], ['inventario', 'Inventário']].map(([id, label]) =>
+  const tabBtns = [['fases', 'Fases'], ['quartel', 'Quartel'], ['inventario', 'Inventário'], ['bestiario', 'Bestiário']].map(([id, label]) =>
     el('button', { class: 'tab', text: label, 'data-tab': id, onclick: () => { tab = id; render(); } }));
 
   function render() {
     tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-    content.replaceChildren(tab === 'fases' ? phasesView() : tab === 'quartel' ? barracksView() : inventoryView());
+    const view = { fases: phasesView, quartel: barracksView, inventario: inventoryView, bestiario: bestiaryView };
+    content.replaceChildren((view[tab] ?? phasesView)());
   }
 
   // ---------- Fases ----------
@@ -43,26 +47,36 @@ export function menuScreen(root, params = {}) {
       const open = phaseUnlocked(acc, i);
       const prog = acc.progress.phases[ph.id];
       const map = byId(data.maps, ph.mapId);
+      const biome = byId(data.biomes, map?.biome);
       return el('div', { class: `card phase-card ${open ? '' : 'locked'}` },
         el('h3', { text: ph.name }),
         el('p', { class: 'muted', text: `${map?.name ?? ''} · ${ph.rounds.length} rodadas · ${ph.lives} vidas` }),
+        biome?.hint && el('p', { class: 'muted', text: biome.hint }),
         el('p', { text: prog?.completed ? 'Concluída' : prog ? `Melhor: rodada ${prog.bestRound}` : 'Nova' }),
         el('button', {
           class: 'btn btn-primary', text: open ? 'Jogar' : 'Bloqueada', disabled: !open,
           onclick: () => go('game', { phaseId: ph.id }),
         }));
     }),
-    el('div', { class: 'card phase-card' },
-      el('h3', { text: 'Modo Infinito' }),
-      el('p', { text: `Recorde: rodada ${acc.progress.endlessBest?.melhorWave ?? 0}` }),
-      el('p', { class: 'muted', text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
-      el('button', { class: 'btn btn-primary', text: 'Jogar Infinito', onclick: () => go('game', { endless: true }) })),
+    (data.biomes.length ? data.biomes.filter((biome) => data.maps.some((map) => map.biome === biome.id)) : [{ id: 'tundra', name: 'Tundra' }])
+      .map((biome) => {
+        const open = biomeUnlocked(acc, data.maps, biome.id);
+        const record = acc.progress.endlessByBiome?.[biome.id] ?? (biome.id === 'tundra' ? acc.progress.endlessBest : null);
+        return el('div', { class: `card phase-card ${open ? '' : 'locked'}` },
+          el('h3', { text: `Infinito · ${biome.name}` }),
+          el('p', { text: `Recorde: rodada ${record?.melhorWave ?? 0}` }),
+          biome.id !== 'tundra' && el('p', { text: `Fragmentos: ${acc.progress.fragments[biome.id] ?? 0}` }),
+          el('p', { class: 'muted', text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
+          el('button', { class: 'btn btn-primary', text: 'Jogar Infinito', disabled: !open,
+            onclick: () => go('game', { endless: true, biomeId: biome.id }) }));
+      }),
     data.raids.map((raid) => {
-      const available = raidAvailable(acc, raid);
+      const open = biomeUnlocked(acc, data.maps, byId(data.maps, raid.mapId)?.biome);
+      const available = open && raidAvailable(acc, raid);
       return el('div', { class: `card phase-card ${available ? '' : 'locked'}` },
         el('h3', { text: raid.name }),
         el('p', { text: `Chaves de raide: ${acc.progress.raidKeys} · Custo: ${raid.keyCost}` }),
-        !available && el('p', { class: 'muted', text: 'Ganhe uma chave a cada 15 rodadas concluídas no Infinito.' }),
+        !available && el('p', { class: 'muted', text: open ? 'Ganhe uma chave a cada 15 rodadas concluídas no Infinito.' : 'Avance nas fases para liberar este bioma.' }),
         el('button', { class: 'btn btn-primary', text: 'Entrar na raide', disabled: !available,
           onclick: () => go('game', { raidId: raid.id }) }));
     }));
@@ -74,13 +88,43 @@ export function menuScreen(root, params = {}) {
       const unlocked = acc.progress.unlocked.includes(def.id);
       return el('button', {
         class: `eskimo-card ${def.id === selectedEskimo ? 'active' : ''} ${unlocked ? '' : 'locked'}`,
-        onclick: () => { if (unlocked) { selectedEskimo = def.id; render(); } else toast(unlockText(def), 'info'); },
+        onclick: () => { if (unlocked || def.unlock?.type === 'fragments') { selectedEskimo = def.id; render(); } else toast(unlockText(def), 'info'); },
       },
       eskimoCanvas(def, 56),
       el('div', {}, el('strong', { text: def.name }), el('small', { text: unlocked ? CLASSES[def.classId]?.name : unlockText(def) })));
     }));
     const def = byId(data.eskimos, selectedEskimo);
-    return el('div', { class: 'barracks' }, list, def ? eskimoDetail(def) : el('p', { text: 'Nenhum esquimó desbloqueado.' }));
+    if (!def) return el('div', { class: 'barracks' }, list, el('p', { text: 'Nenhum esquimó desbloqueado.' }));
+    const unlock = def.unlock;
+    if (unlock?.type !== 'fragments' || acc.progress.unlocked.includes(def.id)) {
+      return el('div', { class: 'barracks' }, list, eskimoDetail(def));
+    }
+    const balance = acc.progress.fragments[unlock.biome] ?? 0;
+    const biome = byId(data.biomes, unlock.biome);
+    return el('div', { class: 'barracks' }, list, el('div', { class: 'card' },
+      el('h2', { text: def.name }), eskimoCanvas(def, 90),
+      el('p', { text: `${balance}/${unlock.amount} fragmentos · ${biome?.name}` }),
+      el('progress', { max: unlock.amount, value: Math.min(balance, unlock.amount), 'aria-label': 'Fragmentos' }),
+      el('div', { class: 'form-actions' }, el('button', { class: 'btn btn-primary', text: 'Recrutar',
+        disabled: balance < unlock.amount, onclick: () => {
+          try { recruitVariant(acc, def.id); render(); }
+          catch (error) { toast(error.message, 'error'); }
+        } }))));
+  }
+
+  function bestiaryView() {
+    const known = data.enemies.filter((enemy) => acc.progress.discoveredEnemies.includes(enemy.id));
+    if (!known.length) return el('div', { class: 'card' }, el('p', { text: 'Jogue uma partida para descobrir inimigos.' }));
+    return el('div', { class: 'phase-grid' }, known.map((enemy) => {
+      const classified = Object.entries(DAMAGE_LABELS).map(([key, name]) => [name, damageMultiplier(data, enemy, key)]);
+      const weak = classified.filter(([, value]) => value >= 1.5).map(([name]) => name);
+      const resisted = classified.filter(([, value]) => value <= 0.5).map(([name]) => name);
+      return el('article', { class: 'card' }, faceCanvas(enemy.face, 60), el('h3', { text: enemy.name }),
+        el('p', { text: ELEMENT_LABELS[enemy.element ?? 'neutro'] }),
+        enemy.traits?.length && el('p', { text: enemy.traits.map((trait) => ENEMY_TRAITS[trait]).filter(Boolean).join(' · ') }),
+        weak.length && el('p', { text: `Fraquezas · ${weak.join(', ')}` }),
+        resisted.length && el('p', { text: `Resistências · ${resisted.join(', ')}` }));
+    }));
   }
 
   function eskimoDetail(def) {
@@ -225,8 +269,9 @@ export function menuScreen(root, params = {}) {
       el('div', { class: 'player' },
         el('strong', { text: acc.username }),
         el('small', { text: `${s.wins} vitórias · ${s.roundsTotal} rodadas` })),
+      preferencesButton(),
       el('button', { class: 'btn btn-small', text: 'Sair', onclick: () => { logout(); go('login'); } })),
-    el('nav', { class: 'tabs' }, tabBtns),
+    el('nav', { class: 'tabs tabs-scroll' }, tabBtns),
     content));
   render();
 }

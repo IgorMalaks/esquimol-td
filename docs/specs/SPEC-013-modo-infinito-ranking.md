@@ -1,6 +1,6 @@
 # SPEC-013 — Modo Infinito e ranking entre amigos
 
-**Status:** planejado (T1.9, T2.6, T3.4)
+**Status:** implementado com recorde local (T1.9); ranking e coop planejados
 
 ## Geração de waves
 Cada partida tem uma `seed` (RNG semeado). Para a wave `n` (começando em 1):

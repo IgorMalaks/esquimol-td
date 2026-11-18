@@ -1,6 +1,6 @@
 # SPEC-008 — Classes Invocador e Suporte
 
-**Status:** planejado (T1.2, T1.3) · **ADR:** 007
+**Status:** implementado no solo (T1.2, T1.3) · **ADR:** 007
 
 ## Papel da classe
 `CLASSES` ganha dois campos definidos em código:

@@ -5,10 +5,17 @@ export const ENEMY_TRAITS = {
   imune_gelo: 'Imune a gelo',
   blindado: 'Blindado',
   regenera: 'Regenera',
+  rapido: 'Corredor',
+  enxame: 'Enxame',
+  curandeiro: 'Curandeiro',
+  escudo: 'Escudeiro',
+  divisor: 'Divisor',
+  ladrao: 'Ladrão',
 };
 
 export const hasTrait = (def, trait) => def.traits?.includes(trait) ?? false;
-export const canHitEnemy = (def, hitsAir) => !hasTrait(def, 'aereo') || Boolean(hitsAir);
+export const canHitEnemy = (def, hitsAir, detection = false) =>
+  (!hasTrait(def, 'aereo') || Boolean(hitsAir)) && (!hasTrait(def, 'camuflado') || Boolean(detection));
 
 export function roundsHaveAir(rounds, enemies) {
   const byId = new Map(enemies.map((enemy) => [enemy.id, enemy]));

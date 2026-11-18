@@ -10,13 +10,16 @@ import { ENEMY_TRAITS, roundsHaveAir } from '../game/enemies.js';
 import { ALLY_DEFAULTS, ALLY_OPTIONS, BUFF_KEYS } from '../game/roles.js';
 import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
 import { economy, RARITY_ORDER } from '../game/economy.js';
+import { DAMAGE_LABELS, DEFAULT_MATRIX, ELEMENT_LABELS } from '../game/elements.js';
+import { BIOME_DEFAULTS, FRAGMENT_DEFAULTS } from '../data/biomes.js';
 import { rbe, layerChain } from '../core/progression.js';
 import { createFaceEditor } from '../ui/faceEditor.js';
 import { drawEskimo, eskimoCanvas, faceCanvas, itemCanvas } from '../render/faceRenderer.js';
 
 const state = { tab: 'eskimos', eskimos: null, enemies: null, phases: null, items: null, draft: null };
 
-const UNLOCK_TYPES = [['default', 'Inicial'], ['wins', 'Nº de vitórias'], ['rounds', 'Nº de rodadas vencidas'], ['phase', 'Completar fase']];
+const UNLOCK_TYPES = [['default', 'Inicial'], ['wins', 'Nº de vitórias'], ['rounds', 'Nº de rodadas vencidas'],
+  ['phase', 'Completar fase'], ['fragments', 'Fragmentos de bioma']];
 const EFFECT_OPTIONS = Object.entries(EFFECT_KEYS).map(([k, v]) => [k, v.label]);
 
 // ---------- Helpers de formulário ----------
@@ -130,14 +133,26 @@ function eskimoForm(draft) {
     supportSection.hidden = role !== 'suporte';
     editor?.redraw();
   }
+  function refreshUnlock() {
+    fragmentFields.node.hidden = base.inputs['unlock.type'].value !== 'fragments';
+  }
   const base = fieldsForm(draft, [
     { key: 'name', label: 'Nome' },
     { key: 'classId', label: 'Classe', type: 'select', options: Object.entries(CLASSES).map(([id, c]) => [id, c.name]), onInput: refreshClass },
     { key: 'bodyColor', label: 'Cor da parka', type: 'color', onInput: () => editor?.redraw() },
     { key: 'cost', label: 'Custo na partida (ouro)', type: 'number', min: 0, step: 5 },
-    { key: 'unlock.type', label: 'Condição de desbloqueio', type: 'select', options: UNLOCK_TYPES },
+    { key: 'damageType', label: 'Tipo de dano', type: 'select', options: [['', 'Padrão da classe'], ...Object.entries(DAMAGE_LABELS)] },
+    { key: 'unlock.type', label: 'Condição de desbloqueio', type: 'select', options: UNLOCK_TYPES, onInput: refreshUnlock },
     { key: 'unlock.value', label: 'Valor do desbloqueio', list: 'phase-ids', hint: 'Número (vitórias/rodadas) ou id da fase' },
   ]);
+  const fragmentFields = fieldsForm(draft, [
+    { key: 'variantOf', label: 'Variante de', type: 'select', options: [['', 'Selecione'], ...data.eskimos
+      .filter((eskimo) => eskimo.id !== draft.id && !eskimo.variantOf).map((eskimo) => [eskimo.id, eskimo.name])] },
+    { key: 'unlock.biome', label: 'Bioma dos fragmentos', type: 'select', options: [['', 'Selecione'], ...data.biomes
+      .filter((biome) => biome.id !== 'tundra').map((biome) => [biome.id, biome.name])] },
+    { key: 'unlock.amount', label: 'Custo em fragmentos (padrão 50)', type: 'number', min: 1, step: 1 },
+  ]);
+  refreshUnlock();
   const stats = fieldsForm(draft, Object.keys(BASE_STATS).filter((k) => k !== 'multishot').map((k) => ({
     key: `stats.${k}`, label: { damage: 'Dano', range: 'Alcance (px)', fireRate: 'Ataques/s', pierce: 'Perfuração', projectileSpeed: 'Vel. projétil', splash: 'Área (px)', slowPct: 'Lentidão %', slowDuration: 'Duração lentidão (s)' }[k],
     type: 'number', step: ['fireRate', 'slowDuration'].includes(k) ? 0.1 : 1, min: 0,
@@ -191,11 +206,16 @@ function eskimoForm(draft) {
     node: el('div', {},
       el('datalist', { id: 'phase-ids' }, data.phases.map((p) => el('option', { value: p.id, text: p.name }))),
       section('Aparência (Criador Visual)', editor.node),
-      section('Identidade e desbloqueio', base.node),
+      section('Identidade e desbloqueio', base.node, fragmentFields.node),
       attackerSection, summonSection, supportSection,
       section('Árvore de habilidades (3 caminhos × 3 níveis)', treeGrid)),
     read(target) {
       base.read(target);
+      if (!target.damageType) delete target.damageType;
+      if (target.unlock.type === 'fragments') {
+        fragmentFields.read(target);
+        if (target.unlock.amount > 100) toast('O custo pode exigir mais de 20 partidas. Confira o simulador de economia.', 'info', 6000);
+      }
       const role = CLASSES[target.classId]?.role ?? 'atacante';
       if (role === 'atacante') stats.read(target);
       if (role === 'invocador') {
@@ -235,7 +255,8 @@ function enemyForm(draft) {
   const others = data.enemies.filter((e) => e.id !== draft.id);
   const f = fieldsForm(draft, [
     { key: 'name', label: 'Nome' },
-    { key: 'hp', label: 'Resistência (acertos na camada)', type: 'number', min: 1, step: 1 },
+    { key: 'hp', label: 'Resistência (vida da camada)', type: 'number', min: 0.1, step: 0.1 },
+    { key: 'element', label: 'Elemento', type: 'select', options: Object.entries(ELEMENT_LABELS) },
     { key: 'speed', label: 'Velocidade (px/s)', type: 'number', min: 5, step: 5 },
     { key: 'size', label: 'Tamanho (raio)', type: 'number', min: 8, max: 60, step: 1 },
     { key: 'reward', label: 'Ouro ao estourar', type: 'number', min: 0, step: 1 },
@@ -262,7 +283,8 @@ function enemyForm(draft) {
       f.read(target);
       target.face = editor.getFace();
       target.traits = traits.filter((trait) => trait.input.checked).map((trait) => trait.id);
-      target.hp = Math.max(1, target.hp);
+      if (target.traits.length > 2) throw new Error('Use até dois traços em cada camada.');
+      target.hp = Math.max(0.1, target.hp);
       target.dropChance = Math.min(1, Math.max(0, target.dropChance));
       if (!target.childId) target.childCount = 0;
       else target.childCount = Math.max(1, target.childCount);
@@ -357,6 +379,7 @@ function itemForm(draft) {
       onInput: () => { ability.node.hidden = f.inputs.type.value !== 'habilidade'; } },
     { key: 'rarity', label: 'Raridade', type: 'select', options: Object.entries(RARITIES).map(([k, v]) => [k, v.name]) },
     { key: 'powerTier', label: 'Força dentro da raridade', type: 'select', options: [['1', '1'], ['2', '2'], ['3', '3']] },
+    { key: 'damageType', label: 'Tipo de dano da arma', type: 'select', options: [['', 'Usar tipo da torre'], ...Object.entries(DAMAGE_LABELS)] },
     { key: 'classRestriction', label: 'Restrito à classe', type: 'select', options: [['', 'Qualquer classe'], ...Object.entries(CLASSES).map(([k, v]) => [k, v.name])] },
     { key: 'dropWeight', label: 'Peso no sorteio de drop', type: 'number', min: 0, step: 1, hint: '0 = nunca dropa' },
   ]);
@@ -365,7 +388,7 @@ function itemForm(draft) {
   ]);
   ability.node.hidden = draft.type !== 'habilidade';
   const st = fieldsForm(draft, Object.entries(EFFECT_KEYS).filter(([key]) =>
-    !/^(ally|aura|buff|summon|maxAllies)/.test(key)).map(([k, v]) =>
+    key !== 'damageType' && !/^(ally|aura|buff|summon|maxAllies)/.test(key)).map(([k, v]) =>
     ({ key: `stats.${k}`, label: v.label, type: 'number', step: 1 })), 'grid-4');
   return {
     node: el('div', {}, section('Item', f.node, ability.node), section('Bônus permanentes (0 = sem bônus)', st.node)),
@@ -434,6 +457,7 @@ function raidForm(draft) {
 function economyTab() {
   const draft = clone(economy(getData()));
   draft.abilityScales ??= clone(ABILITY_SCALES);
+  draft.fragments = { ...FRAGMENT_DEFAULTS, ...draft.fragments };
   const groups = [
     ['Regras de economia', [
       numberField('dropRateMultiplier', 'Multiplicador de drops (0 a 1)', 0, 0.01),
@@ -442,6 +466,15 @@ function economyTab() {
       numberField('legendaryThreshold', 'Chefes até a garantia', 1),
       numberField('raidKeyCap', 'Limite de chaves', 1),
       ...[1, 2, 3].map((tier) => numberField(`legendaryFactors.${tier}`, `Peso na garantia · força ${tier}`, 0.01, 0.01)),
+    ]],
+    ['Fragmentos', [
+      numberField('fragments.layerChance', 'Chance por camada (0 a 1)', 0, 0.001),
+      numberField('fragments.firstWin', 'Bônus da primeira vitória'),
+      numberField('fragments.win', 'Bônus de outra vitória'),
+      numberField('fragments.raidMin', 'Mínimo do chefe de raide'),
+      numberField('fragments.raidMax', 'Máximo do chefe de raide'),
+      numberField('fragments.endlessInterval', 'Rodadas por fragmento no Infinito', 1),
+      numberField('fragments.xp', 'XP por fragmento após recrutar', 1),
     ]],
     ...[['normal', 'Fases e Infinito'], ['raidFarm', 'Farm da raide'], ['raidBoss', 'Chefe da raide']].map(([source, label]) =>
       [label, (source === 'raidBoss' ? RARITY_ORDER.slice(2) : RARITY_ORDER.slice(0, -1))
@@ -461,10 +494,42 @@ function economyTab() {
       try {
         for (const { form } of groups) form.read(draft);
         for (const { rarity, input } of fusion) draft.fusionAllowed[rarity] = input.checked;
+        const fragments = draft.fragments;
+        if (fragments.layerChance < 0 || fragments.layerChance > 1 || fragments.raidMin > fragments.raidMax ||
+            fragments.endlessInterval < 1 || fragments.xp < 1) throw new Error('Configuração de fragmentos inválida.');
         saveData({ ...getData(), economy: draft });
         toast('Economia salva.', 'success');
       } catch (error) { toast(error.message, 'error'); }
     } }));
+}
+
+function elementsTab() {
+  const data = getData();
+  const draft = clone(data.elements ?? DEFAULT_MATRIX);
+  const forms = Object.entries(ELEMENT_LABELS).map(([element, title]) => ({
+    title, fields: fieldsForm(draft[element], Object.entries(DAMAGE_LABELS)
+      .map(([damageType, name]) => numberField(damageType, name, 0, 0.05)), 'grid-3'),
+    element,
+  }));
+  return el('div', { class: 'card data-tab' },
+    forms.map(({ title, fields }) => section(title, fields.node)),
+    el('button', { class: 'btn btn-primary', text: 'Salvar matriz', onclick: () => {
+      try {
+        for (const { fields, element } of forms) fields.read(draft[element]);
+        saveData({ ...getData(), elements: draft });
+        toast('Matriz salva.', 'success');
+      } catch (error) { toast(error.message, 'error'); }
+    } }));
+}
+
+function biomeForm(draft) {
+  const colors = { ground: 'Chão', edge: 'Borda', path: 'Caminho', trees: 'Decoração' };
+  return fieldsForm(draft, [
+    { key: 'name', label: 'Nome' }, { key: 'hint', label: 'Descrição do modificador' },
+    { key: 'effect', label: 'Modificador', type: 'select', options: BIOME_DEFAULTS.map(({ effect }) => [effect, effect]) },
+    ...Object.entries(colors).map(([key, label]) => ({ key: `palette.${key}`, label, type: 'color' })),
+    ...Object.entries(ELEMENT_LABELS).map(([id, name]) => numberField(`weights.${id}`, `Peso · ${name}`, 0, 0.1)),
+  ]);
 }
 
 // ---------- Aba 5: Dados ----------
@@ -522,7 +587,8 @@ function dataTab() {
 // ---------- Tela ----------
 let rootEl = null;
 const TABS = [['eskimos', 'Esquimós'], ['enemies', 'Inimigos'], ['phases', 'Fases & Rodadas'], ['items', 'Itens & Armas'],
-  ['raids', 'Raides'], ['abilities', 'Habilidades'], ['economy', 'Economia'], ['data', 'Dados']];
+  ['raids', 'Raides'], ['abilities', 'Habilidades'], ['economy', 'Economia'], ['biomes', 'Biomas'],
+  ['elements', 'Elementos'], ['data', 'Dados']];
 
 function render() {
   const content = {
@@ -567,6 +633,13 @@ function render() {
         'Existe um item que usa esta habilidade.' : null,
     }),
     economy: economyTab,
+    biomes: () => entityTab({
+      key: 'biomes', prefix: 'bioma', newLabel: 'Bioma',
+      thumb: (biome) => el('span', { class: 'phase-thumb', style: { background: biome.palette.ground } }),
+      sub: (biome) => biome.effect, buildForm: biomeForm,
+      newEntity: () => ({ ...structuredClone(BIOME_DEFAULTS[0]), id: '', name: '' }),
+    }),
+    elements: elementsTab,
     data: dataTab,
   }[state.tab]();
 

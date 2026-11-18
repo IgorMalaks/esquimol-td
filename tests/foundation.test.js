@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDefaultData } from '../js/data/defaults.js';
 import { prepareData } from '../js/data/gameData.js';
-import { applyMatchResult, ensureProgress, fuseItems, migrateProgress, setAbilitySlot, spendRaidKeys } from '../js/core/progression.js';
+import { applyMatchResult, ensureProgress, fuseItems, migrateProgress, recruitVariant, setAbilitySlot, spendRaidKeys } from '../js/core/progression.js';
 import { canHitEnemy, roundsHaveAir } from '../js/game/enemies.js';
 import { computeStats } from '../js/game/stats.js';
 import { projectY, groundY } from '../js/game/game.js';
@@ -13,6 +13,7 @@ import { abilityStats } from '../js/game/abilities.js';
 import { applyAuras, summonerStats } from '../js/game/roles.js';
 import { raidPhase } from '../js/game/raids.js';
 import { SpatialGrid } from '../js/game/spatialGrid.js';
+import { damageFeedback, damageMultiplier, DEFAULT_MATRIX, validateMatrix } from '../js/game/elements.js';
 
 Object.defineProperty(globalThis, 'localStorage', {
   value: {
@@ -162,7 +163,7 @@ test('chaves do Infinito são limitadas e gastas por raide', () => {
   spendRaidKeys(acc, raid);
   assert.equal(acc.progress.raidKeys, 4);
   assert.equal(raidPhase(raid).rounds.at(-1).groups[0].enemyId, raid.bossId);
-  assert.equal(prepareData(data).raids.length, 1);
+  assert.equal(prepareData(data).raids.length, 3);
 });
 
 test('escala habilidades por raridade e impede equipar a mesma cópia em dois slots', () => {
@@ -176,4 +177,34 @@ test('escala habilidades por raridade e impede equipar a mesma cópia em dois sl
   setAbilitySlot(account, 0, 'nevasca');
   setAbilitySlot(account, 1, 'nevasca');
   assert.deepEqual(account.progress.activeAbilities, [null, 'nevasca']);
+});
+
+test('elementos respeitam arma, nó, eficácia e imunidade', () => {
+  const data = createDefaultData();
+  const mage = data.eskimos.find((def) => def.id === 'ila');
+  const golem = data.enemies.find((def) => def.id === 'golem_frio');
+  assert.equal(damageMultiplier(data, golem, computeStats(mage).damageType), 0.25);
+  const fire = computeStats(mage, { items: [{ type: 'arma', damageType: 'fogo' }] }).damageType;
+  assert.equal(damageMultiplier(data, golem, fire), 1.75);
+  assert.equal(damageFeedback(damageMultiplier(data, { element: 'fogo' }, fire)), 'IMUNE');
+  assert.equal(computeStats(mage, { items: [{ type: 'arma', damageType: 'fogo' }],
+    nodes: [{ effect: { key: 'damageType', value: 0 } }] }).damageType, 'perfurante');
+  assert.doesNotThrow(() => validateMatrix(DEFAULT_MATRIX));
+  const invalid = structuredClone(DEFAULT_MATRIX);
+  invalid.pedra = structuredClone(invalid.neutro);
+  assert.throws(() => validateMatrix(invalid), /fraqueza/);
+});
+
+test('vitória e recrutamento preservam os saldos de cada bioma', () => {
+  const acc = ensureProgress({ username: 'Variante' });
+  assert.equal(acc.progress.unlocked.includes('ila_cristal'), false);
+  assert.throws(() => recruitVariant(acc, 'ila_cristal'), /insuficientes/);
+  applyMatchResult(acc, {
+    victory: true, phaseId: 'galeria_escura', biome: 'caverna', roundsCompleted: 5, items: [], usedEskimos: [],
+  });
+  assert.deepEqual(acc.progress.fragments, { caverna: 5 });
+  acc.progress.fragments.caverna += 47;
+  recruitVariant(acc, 'ila_cristal');
+  assert.deepEqual(acc.progress.fragments, { caverna: 2 });
+  assert.equal(acc.progress.unlocked.includes('ila_cristal'), true);
 });

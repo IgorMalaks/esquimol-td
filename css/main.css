@@ -1,21 +1,20 @@
 /* ====== Tema ====== */
 :root {
-  --sky-1: #7fd0ff;
-  --sky-2: #e8f7ff;
-  --ink: #1b1b1b;
-  --ink-soft: #4a5a6a;
-  --card: #ffffff;
-  --primary: #2fa8ff;
-  --primary-dark: #1478c8;
-  --go: #4cd137;
-  --go-dark: #2f9a20;
-  --danger: #ff4757;
-  --danger-dark: #c0303d;
-  --gold: #ffd32a;
-  --radius: 16px;
-  --outline: 3px solid var(--ink);
-  --shadow: 0 5px 0 var(--ink);
-  --font: "Arial Rounded MT Bold", "Trebuchet MS", "Nunito", system-ui, sans-serif;
+  --sky-1: var(--frost-300);
+  --sky-2: var(--frost-50);
+  --ink-soft: var(--text-muted);
+  --card: var(--surface);
+  --primary: var(--frost-600);
+  --primary-dark: var(--frost-700);
+  --go: var(--go-500);
+  --go-dark: var(--go-700);
+  --danger: var(--danger-500);
+  --danger-dark: var(--danger-700);
+  --gold: var(--gold-500);
+  --radius: var(--r-lg);
+  --outline: var(--bw) solid var(--ink);
+  --shadow: var(--lift-2);
+  --font: var(--font-body);
   --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
@@ -56,9 +55,11 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
   background: #f1f2f6; border: var(--outline); border-radius: 12px;
   padding: .55rem 1rem; box-shadow: 0 4px 0 var(--ink);
   transition: transform .05s, box-shadow .05s; user-select: none;
+  min-height: var(--tap-min);
 }
 .btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:focus-visible, .tab:focus-visible, .tower-card:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .btn-primary { background: var(--primary); color: #fff; text-shadow: 0 2px 0 var(--primary-dark); }
 .btn-go { background: var(--go); color: #fff; text-shadow: 0 2px 0 var(--go-dark); }
 .btn-danger { background: var(--danger); color: #fff; }
@@ -177,6 +178,11 @@ h1, h2, h3, h4 { margin: .3rem 0 .6rem; }
 .hud-boss[hidden] { display: none; }
 .hud-boss progress { width: min(42vw, 18rem); accent-color: #bb3553; }
 .hud-abilities { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.tutorial-guide {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  padding: .3rem .7rem; background: var(--surface-3); border-bottom: 1px solid var(--frost-300);
+}
+.tutorial-guide[hidden] { display: none; }
 .ability-button { display: inline-flex; align-items: center; gap: .4rem; }
 .ability-button[aria-pressed=true] { background: #d0ebff; }
 .ability-timer {

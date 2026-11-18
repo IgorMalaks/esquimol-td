@@ -1,9 +1,9 @@
 // Arena: HUD, barra de esquimós (toque ou arraste), painel de upgrades e fim de partida.
 import { el, toast, modal, confirmDialog, uid } from '../core/utils.js';
 import { go } from '../core/router.js';
-import { currentAccount } from '../core/auth.js';
+import { currentAccount, saveAccount } from '../core/auth.js';
 import { getData, byId } from '../data/gameData.js';
-import { ensureProgress, equippedItems, applyMatchResult, spendRaidKeys, instanceItem } from '../core/progression.js';
+import { biomeUnlocked, ensureProgress, equippedItems, applyMatchResult, spendRaidKeys, instanceItem } from '../core/progression.js';
 import { Game, TARGET_LABEL } from '../game/game.js';
 import { UPGRADE_TRACKS, upgradeCost, effectText, STAT_LABELS, computeStats } from '../game/stats.js';
 import { eskimoCanvas, itemCanvas } from '../render/faceRenderer.js';
@@ -12,25 +12,47 @@ import { roundsHaveAir } from '../game/enemies.js';
 import { economy } from '../game/economy.js';
 import { raidAvailable, raidPhase } from '../game/raids.js';
 import { abilityStats } from '../game/abilities.js';
+import { DAMAGE_LABELS, ELEMENT_LABELS } from '../game/elements.js';
 
 const DRAG_THRESHOLD = 10;
 
-export function gameScreen(root, { phaseId, endless = false, raidId }) {
+export function gameScreen(root, { phaseId, endless = false, raidId, biomeId }) {
   const acc = currentAccount();
   if (!acc) { go('login'); return; }
   ensureProgress(acc);
   const data = getData();
   const raid = raidId && byId(data.raids, raidId);
-  if (raidId && (!raid || !raidAvailable(acc, raid))) {
+  const raidMap = raid && byId(data.maps, raid.mapId);
+  if (raidId && (!raid || !raidAvailable(acc, raid) || !biomeUnlocked(acc, data.maps, raidMap?.biome))) {
     toast('Você precisa de chaves para iniciar esta raide.', 'error');
     go('menu');
     return;
   }
+  const endlessMap = data.maps.find((map) => map.biome === biomeId && biomeUnlocked(acc, data.maps, biomeId)) ?? data.maps[0];
   const phase = raid ? raidPhase(raid) : endless
-    ? { id: 'infinito', name: 'Modo Infinito', mapId: data.maps[0]?.id, startGold: 650, lives: 100, rounds: [], endless: uid('seed') }
+    ? { id: 'infinito', name: 'Modo Infinito', mapId: endlessMap?.id, startGold: 650, lives: 100, rounds: [], endless: uid('seed') }
     : byId(data.phases, phaseId);
   const map = phase && byId(data.maps, phase.mapId);
   if (!phase || !map) { toast('Fase inválida.', 'error'); go('menu'); return; }
+  const biome = byId(data.biomes, map.biome);
+  const guideSteps = [
+    ['place', 'Escolha Nanuk e toque numa área livre ao lado do caminho.'],
+    ['round', 'Inicie a rodada para colocar a defesa à prova.'],
+    ['upgrade', 'Toque no esquimó e compre uma melhoria.'],
+    ['drop', 'Toque no baú de treino no mapa para praticar a coleta.'],
+  ];
+  const guideActions = new Set();
+  let showGuide = phaseId === data.phases[0]?.id && !acc.progress.tutorialDone;
+  const guideText = el('strong', { 'aria-live': 'polite', text: guideSteps[0][1] });
+  const guide = el('div', { class: 'tutorial-guide', hidden: !showGuide }, guideText,
+    el('button', { class: 'btn btn-small', text: 'Pular guia', onclick: closeGuide }));
+
+  function closeGuide() {
+    showGuide = false;
+    acc.progress.tutorialDone = true;
+    guide.hidden = true;
+    try { saveAccount(acc); } catch (error) { toast(error.message, 'error'); }
+  }
 
   const roster = acc.progress.unlocked.map((id) => {
     const def = byId(data.eskimos, id);
@@ -90,9 +112,12 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
       el('div', { class: 'hud-stats' },
         el('span', { class: 'hud-item lives', title: 'Vidas' }, el('i', { class: 'ico-heart' }), hud.lives),
         el('span', { class: 'hud-item gold', title: 'Ouro' }, el('i', { class: 'ico-coin' }), hud.gold),
-        el('span', { class: 'hud-item', title: 'Rodada' }, 'Rodada ', hud.round)),
+        el('span', { class: 'hud-item', title: 'Rodada' }, 'Rodada ', hud.round),
+        biome?.hint && el('button', { class: 'btn btn-small', text: biome.name,
+          title: biome.hint, onclick: () => toast(biome.hint, 'info', 5000) })),
       el('div', { class: 'hud-actions' }, autoBtn, speedBtn, startBtn, exitBtn),
       abilityButtons.some(Boolean) && el('div', { class: 'hud-abilities' }, abilityButtons.map((entry) => entry?.button)), bossStatus),
+    guide,
     el('div', { class: 'game-body' }, el('div', { class: 'canvas-wrap' }, canvas, panel), bar)));
 
   const game = new Game(canvas, {
@@ -107,6 +132,9 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
         const air = upcoming && roundsHaveAir([upcoming], data.enemies);
         startBtn.textContent = s.preparation !== null ? `Chefe em ${s.preparation}s` :
           s.roundActive ? 'Em andamento...' : air ? 'Iniciar rodada · Aéreos' : 'Iniciar rodada';
+        const elements = upcoming ? [...new Set(upcoming.groups.map((group) =>
+          ELEMENT_LABELS[byId(data.enemies, group.enemyId)?.element] ?? 'Neutro'))] : [];
+        startBtn.title = elements.length ? `Próxima rodada · ${elements.join(', ')}` : '';
         bossStatus.hidden = !s.boss && s.preparation === null;
         bossLife.hidden = !s.boss;
         if (s.boss) {
@@ -134,6 +162,14 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
       onSelect: (t) => renderPanel(t),
       onToast: (m, type) => toast(m, type, 2000),
       onEnd: (r) => showResult(r),
+      needsPracticeDrop: () => showGuide && !guideActions.has('drop'),
+      onAction: (action) => {
+        if (!showGuide) return;
+        guideActions.add(action);
+        const step = guideSteps.find(([key]) => !guideActions.has(key));
+        if (step) guideText.textContent = step[1];
+        else { closeGuide(); toast('Treino concluído.', 'success'); }
+      },
       onRaidStart: () => {
         try {
           spendRaidKeys(acc, raid);
@@ -221,7 +257,8 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
     const values = t.summon
       ? [['Dano aliado', t.summon.allyDamage], ['Vida aliado', t.summon.allyHp], ['Invocação', t.summon.summonInterval]]
       : s.buffs ? [['Raio da aura', s.range], ['Bônus de dano', s.buffs.damage ?? 0], ['Antiaéreo', s.buffs.antiAereo ? 'Sim' : 'Não']]
-      : ['damage', 'range', 'fireRate', 'pierce'].map((key) => [STAT_LABELS[key], s[key]]);
+      : [...['damage', 'range', 'fireRate', 'pierce'].map((key) => [STAT_LABELS[key], s[key]]),
+        ['Tipo de dano', DAMAGE_LABELS[s.damageType]]];
     panel.replaceChildren(
       el('div', { class: 'panel-head' },
         eskimoCanvas(t.def, 44),
@@ -248,6 +285,8 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
         el('p', { text: `Rodadas completadas: ${r.roundsCompleted}${endless ? '' : `/${phase.rounds.length}`}` }),
         (endless || raid) && el('p', { text: `Garantia de Lendário: ${acc.progress.legendaryPity}/${economy(data).legendaryThreshold}` }),
         el('p', { text: `XP para cada esquimó usado: +${res.xp}` }),
+        res.fragments > 0 && el('p', { class: 'bonus', text: `+${res.fragments} fragmentos · ${res.biome.name}` }),
+        res.fragmentXp && el('p', { class: 'bonus', text: `+${res.fragmentXp.amount} XP de fragmentos · ${res.fragmentXp.name}` }),
         res.levelUps.length && el('p', { class: 'bonus', text: `Novo ponto de habilidade: ${res.levelUps.map((id) => byId(data.eskimos, id)?.name).join(', ')}` }),
         res.newUnlocks.length && el('div', { class: 'unlocks' }, el('p', { class: 'bonus', text: 'Novo esquimó desbloqueado!' }),
           res.newUnlocks.map((d) => el('div', { class: 'unlock' }, eskimoCanvas(d, 64), el('strong', { text: d.name })))),
@@ -255,7 +294,7 @@ export function gameScreen(root, { phaseId, endless = false, raidId }) {
         el('ul', { class: 'item-list' }, itemDefs.map((it) => el('li', { class: `rarity-${it.rarity}` }, itemCanvas(it, 28), el('strong', { text: it.name }))))),
       actions: [
         { label: 'Quartel', onClick: () => go('menu', { tab: 'quartel' }) },
-        ...(!raid || raidAvailable(acc, raid) ? [{ label: 'Jogar de novo', onClick: () => go('game', { phaseId, endless, raidId }) }] : []),
+        ...(!raid || raidAvailable(acc, raid) ? [{ label: 'Jogar de novo', onClick: () => go('game', { phaseId, endless, raidId, biomeId }) }] : []),
         { label: 'Menu', class: 'btn-primary', onClick: () => go('menu') },
       ],
     });

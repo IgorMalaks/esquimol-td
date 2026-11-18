@@ -1,6 +1,6 @@
 # SPEC-009 — Traits de inimigos e inimigos aéreos
 
-**Status:** planejado (T1.1) · **ADR:** 006, 016
+**Status:** implementado no solo (T1.1) · **ADR:** 006, 016
 
 ## Traits
 Inimigo ganha `traits: string[]`, com valores de uma lista fechada em código:

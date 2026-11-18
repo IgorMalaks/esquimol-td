@@ -5,6 +5,8 @@ import { skillPoints, pointsSpent } from '../game/stats.js';
 import { uid } from './utils.js';
 import { economy, fusionPool, resolveBossLoot, weightedPick } from '../game/economy.js';
 import { raidAvailable } from '../game/raids.js';
+import { hasTrait } from '../game/enemies.js';
+import { FRAGMENT_DEFAULTS, fragmentReward } from '../data/biomes.js';
 export { rollItem } from '../game/economy.js';
 
 export const SLOTS = ['arma', 'armadura', 'amuleto'];
@@ -45,6 +47,8 @@ export function ensureProgress(acc) {
     return uid && instanceItem(acc, uid)?.type === 'habilidade' ? uid : null;
   });
   p.stats = { wins: 0, losses: 0, roundsTotal: 0, ...p.stats };
+  p.discoveredEnemies ??= [];
+  p.fragmentTargets ??= {};
 
   p.unlocked = p.unlocked.filter((id) => byId(data.eskimos, id));
   p.inventory = p.inventory.filter((inst) => byId(data.items, inst.itemId));
@@ -73,6 +77,7 @@ export function unlockMet(def, acc) {
     case 'wins': return p.stats.wins >= Number(u.value);
     case 'rounds': return p.stats.roundsTotal >= Number(u.value);
     case 'phase': return !!p.phases[u.value]?.completed;
+    case 'fragments': return false;
     default: return true;
   }
 }
@@ -83,6 +88,7 @@ export function unlockText(def) {
     case 'wins': return `Vença ${u.value} fase(s)`;
     case 'rounds': return `Complete ${u.value} rodadas no total`;
     case 'phase': return `Complete a fase "${byId(getData().phases, u.value)?.name ?? u.value}"`;
+    case 'fragments': return `${u.amount} fragmentos · ${byId(getData().biomes, u.biome)?.name ?? u.biome}`;
     default: return 'Disponível desde o início';
   }
 }
@@ -103,6 +109,29 @@ export function phaseUnlocked(acc, index) {
   if (index === 0) return true;
   const prev = getData().phases[index - 1];
   return !!acc.progress.phases[prev.id]?.completed;
+}
+
+export function biomeUnlocked(acc, maps, biomeId) {
+  if (!biomeId || biomeId === 'tundra') return true;
+  const phases = getData().phases;
+  const first = phases.findIndex((phase) => byId(maps, phase.mapId)?.biome === biomeId);
+  return first >= 0 && phaseUnlocked(acc, first);
+}
+
+export function recruitVariant(account, id) {
+  const def = byId(getData().eskimos, id);
+  const unlock = def?.unlock;
+  const progress = account.progress;
+  if (unlock?.type !== 'fragments' || progress.unlocked.includes(id)) throw new Error('Este esquimó não pode ser recrutado.');
+  const balance = progress.fragments[unlock.biome] ?? 0;
+  if (balance < unlock.amount) throw new Error('Fragmentos insuficientes.');
+  const next = { ...progress,
+    fragments: { ...progress.fragments, [unlock.biome]: balance - unlock.amount },
+    unlocked: [...progress.unlocked, id],
+    eskimos: { ...progress.eskimos, [id]: newEskimoProgress() },
+  };
+  saveAccount({ ...account, progress: next });
+  account.progress = next;
 }
 
 // ---------- Itens ----------
@@ -198,7 +227,8 @@ export function rbe(enemyId, data, memo = Object.create(null)) {
   const e = byId(data.enemies, enemyId);
   if (!e) return 0;
   memo[enemyId] = 0;
-  const v = Math.max(1, Number(e.hp) || 1) + (e.childId ? (Number(e.childCount) || 1) * rbe(e.childId, data, memo) : 0);
+  const children = (Number(e.childCount) || 1) * (hasTrait(e, 'divisor') ? 2 : 1);
+  const v = Math.max(1, Number(e.hp) || 1) + (e.childId ? children * rbe(e.childId, data, memo) : 0);
   memo[enemyId] = v;
   return v;
 }
@@ -219,6 +249,27 @@ export function layerChain(enemyId, data) {
 export function applyMatchResult(acc, r) {
   const p = acc.progress;
   const data = getData();
+  const first = !p.phases[r.phaseId]?.completed;
+  const biome = byId(data.biomes, r.biome);
+  p.discoveredEnemies = [...new Set([...p.discoveredEnemies, ...(r.seenEnemies ?? [])])];
+  const fragmentSettings = { ...FRAGMENT_DEFAULTS, ...data.economy?.fragments };
+  let fragments = 0;
+  let fragmentXp = null;
+  if (biome && biome.id !== 'tundra') {
+    const variants = data.eskimos.filter((def) => def.unlock?.type === 'fragments' && def.unlock.biome === biome.id);
+    if (variants.length) {
+      fragments = fragmentReward(fragmentSettings, {
+        layers: r.layersPopped ?? 0, first, victory: r.victory, raid: r.raid,
+        endlessRounds: r.endless ? r.roundsCompleted : 0,
+      });
+      if (fragments && variants.every((def) => p.unlocked.includes(def.id))) {
+        const selected = variants.find((def) => def.id === p.fragmentTargets[biome.id]) ?? variants[0];
+        p.eskimos[selected.id].xp += fragments * fragmentSettings.xp;
+        fragmentXp = { name: selected.name, amount: fragments * fragmentSettings.xp };
+        fragments = 0;
+      } else if (fragments) p.fragments[biome.id] = (p.fragments[biome.id] ?? 0) + fragments;
+    }
+  }
   const items = [...r.items];
   for (const drops of r.bossDrops ?? []) {
     const bossLoot = resolveBossLoot(data, p.legendaryPity ?? 0, drops.map((id) => byId(data.items, id)).filter(Boolean));
@@ -234,10 +285,12 @@ export function applyMatchResult(acc, r) {
   p.stats.roundsTotal += r.roundsCompleted;
   if (r.endless) {
     p.raidKeys = Math.min(economy(data).raidKeyCap, (p.raidKeys ?? 0) + Math.floor(r.roundsCompleted / 15));
-    if (r.roundsCompleted > (p.endlessBest?.melhorWave ?? 0)) {
-      p.endlessBest = { melhorWave: r.roundsCompleted, data: now, duracaoSeg: r.duration,
-        esquadrao: [...r.usedEskimos], seed: r.endless, modo: 'solo' };
-    }
+    const record = { melhorWave: r.roundsCompleted, data: now, duracaoSeg: r.duration,
+      esquadrao: [...r.usedEskimos], seed: r.endless, modo: 'solo' };
+    if (r.roundsCompleted > (p.endlessBest?.melhorWave ?? 0)) p.endlessBest = record;
+    const mapBiome = biome?.id ?? 'tundra';
+    p.endlessByBiome ??= {};
+    if (r.roundsCompleted > (p.endlessByBiome[mapBiome]?.melhorWave ?? 0)) p.endlessByBiome[mapBiome] = record;
   } else if (r.raid) {
     p.raids ??= {};
     const raid = (p.raids[r.raid] ??= { wins: 0, losses: 0 });
@@ -265,5 +318,5 @@ export function applyMatchResult(acc, r) {
   }
   const newUnlocks = checkUnlocks(acc);
   saveAccount(acc);
-  return { gained, xp, levelUps, newUnlocks };
+  return { gained, xp, levelUps, newUnlocks, fragments, fragmentXp, biome };
 }

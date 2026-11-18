@@ -5,6 +5,7 @@ import { migrateData } from './migrations.js';
 import { hasTrait } from '../game/enemies.js';
 import { ABILITY_SCALES, ABILITY_TYPES } from '../game/abilities.js';
 import { DEFAULT_ECONOMY, economy } from '../game/economy.js';
+import { validateMatrix } from '../game/elements.js';
 
 let cache = null;
 
@@ -30,8 +31,18 @@ export function getData() {
 export function prepareData(data) {
   validateData(data);
   const next = migrateData(data);
+  if (next.elements !== undefined) validateMatrix(next.elements);
   for (const key of ['abilities', 'raids', 'biomes']) {
     if (!Array.isArray(next[key])) throw new Error(`Dados inválidos: "${key}" ausente.`);
+  }
+  for (const map of next.maps) {
+    if (map.biome && !byId(next.biomes, map.biome)) throw new Error(`Bioma inválido no mapa "${map.name}".`);
+  }
+  for (const eskimo of next.eskimos) {
+    const unlock = eskimo.unlock;
+    if (unlock?.type === 'fragments' && (unlock.biome === 'tundra' || !byId(next.biomes, unlock.biome) ||
+        !Number.isInteger(unlock.amount) || unlock.amount < 1 || !byId(next.eskimos, eskimo.variantOf) ||
+        eskimo.variantOf === eskimo.id)) throw new Error(`Recrutamento inválido em "${eskimo.name}".`);
   }
   for (const ability of next.abilities) {
     if (!Object.hasOwn(ABILITY_TYPES, ability.type) || ['power', 'area', 'duration'].some((key) =>

@@ -1,6 +1,6 @@
 import { seededRandom } from '../core/utils.js';
 import { rbe } from '../core/progression.js';
-import { endlessBudget, endlessHp } from './economy.js';
+import { endlessBudget, endlessHp, weightedPick } from './economy.js';
 import { hasTrait } from './enemies.js';
 
 export function endlessEnemies(data, wave) {
@@ -9,7 +9,7 @@ export function endlessEnemies(data, wave) {
   return data.enemies.map((def) => ({ ...def, hp: Math.ceil(def.hp * hp), speed: def.speed * speed }));
 }
 
-export function endlessRound(data, wave, seed, canFly = true) {
+export function endlessRound(data, wave, seed, canFly = true, weights = null) {
   const rng = seededRandom(`${seed}:${wave}`);
   const ranked = [...data.enemies].sort((a, b) => rbe(a.id, data) - rbe(b.id, data));
   const ground = ranked.filter((def) => !hasTrait(def, 'aereo') && !hasTrait(def, 'chefe'));
@@ -27,9 +27,9 @@ export function endlessRound(data, wave, seed, canFly = true) {
       return cost <= budget && (!hasTrait(def, 'aereo') || cost <= airBudget);
     });
     if (!candidates.length) break;
-    const def = candidates[Math.floor(rng() * candidates.length)];
+    const def = weightedPick(candidates, (enemy) => weights?.[enemy.element] ?? 1, rng) ?? candidates[0];
     const cost = rbe(def.id, data, memo);
-    const count = Math.min(4 + Math.floor(rng() * 8), Math.floor(budget / cost),
+    const count = Math.min((hasTrait(def, 'enxame') ? 8 : 4) + Math.floor(rng() * (hasTrait(def, 'enxame') ? 5 : 8)), Math.floor(budget / cost),
       hasTrait(def, 'aereo') ? Math.floor(airBudget / cost) : Infinity);
     groups.push({ enemyId: def.id, count, interval: 0.24, delay });
     if (hasTrait(def, 'aereo')) airBudget -= cost * count;

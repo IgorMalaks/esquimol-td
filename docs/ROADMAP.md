@@ -19,12 +19,12 @@ O commit de importação preserva a licença e o histórico do repositório. O e
 
 | ID | Tarefa | Spec / ADR | Depende de |
 |---|---|---|---|
-| [ ] T0.0 | **Base do projeto:** (a) `git init` + primeiro commit; (b) `docs/DATA-MODEL.md` com o formato completo e versionado de esquimó, inimigo, item, habilidade, fase, raide, bioma e conta (inclui `traits`, `powerTier`, `origin`, `damageType`, `element`, `fragments`, `raidKeys`, `legendaryPity`); (c) `tools/sim-economia.mjs`: simula N partidas e mostra curvas (partidas até o 1º Lendário, fragmentos por bioma, RBE × dano das waves do Infinito). | — | — |
-| [ ] T0.1 | **Migração de schema** do conteúdo (`migrations[v]` em `gameData.js`) e do progresso da conta. Sem isso, qualquer mudança de formato apaga o que o admin criou. | SPEC-002 R7 | T0.0 |
-| [ ] T0.2 | **2.5D na arena** (vista 3/4, inclinação 0,95): render, preview de posicionamento, conversão de toque, preview do esquimó no admin. Lógica do jogo inalterada. | ADR-016 | — |
-| [~] T0.3 | Testes de lógica pura. **Feito:** `tests/logic.test.js` (caminho, atributos, árvore, upgrades, validação, RBE, sorteio) e `package.json` com `npm test`. **Falta:** cobrir `applyMatchResult`, `ensureProgress` e cada nova regra das tarefas seguintes. | — | — |
+| [x] T0.0 | **Base do projeto:** (a) `git init` + primeiro commit; (b) `docs/DATA-MODEL.md` com o formato completo e versionado de esquimó, inimigo, item, habilidade, fase, raide, bioma e conta (inclui `traits`, `powerTier`, `origin`, `damageType`, `element`, `fragments`, `raidKeys`, `legendaryPity`); (c) `tools/sim-economia.mjs`: simula N partidas e mostra curvas (partidas até o 1º Lendário, fragmentos por bioma, RBE × dano das waves do Infinito). | — | — |
+| [x] T0.1 | **Migração de schema** do conteúdo (`migrations[v]` em `gameData.js`) e do progresso da conta. Sem isso, qualquer mudança de formato apaga o que o admin criou. | SPEC-002 R7 | T0.0 |
+| [x] T0.2 | **2.5D na arena** (vista 3/4, inclinação 0,95): render, preview de posicionamento, conversão de toque, preview do esquimó no admin. Lógica do jogo inalterada. | ADR-016 | — |
+| [x] T0.3 | Testes de lógica pura em `tests/logic.test.js` e `tests/foundation.test.js`, incluindo `ensureProgress` e `applyMatchResult`. | — | — |
 | [ ] T0.4 ⚠ | Limpeza: `~/Documents/eskimo-td`, `~/Documents/frost-pop-td`, `~/fpt-login.png` para a lixeira; parar servidores nas portas 8765 e 5301. **Só após T0.3 e com OK do Igor.** | — | T0.3 |
-| [ ] T0.5 | Gancho `?debug` só ativo com flag de desenvolvimento (`localStorage etd.dev=1` ou build). | ADR-004 | — |
+| [x] T0.5 | Gancho `?debug` só ativo com flag de desenvolvimento (`localStorage etd.dev=1` ou build). | ADR-004 | — |
 
 ## F1 — Conteúdo novo (roda sem servidor)
 
@@ -32,27 +32,31 @@ Ordem recomendada pelas dependências:
 
 | ID | Tarefa | Spec / ADR | Depende de |
 |---|---|---|---|
-| [ ] T1.1 | **Traits de inimigo** + **inimigos aéreos** (altitude, sombra, só atingidos por quem tem `hitsAir`). | SPEC-009 | T0.1, T0.2 |
-| [ ] T1.2 | **Classe Suporte** (aura de buffs que não empilham por tipo; buff "antiaéreo"). | SPEC-008 | T1.1 |
-| [ ] T1.3 | **Classe Invocador** (aliados saem da base e andam contra o fluxo). | SPEC-008 | T0.2 |
-| [ ] T1.4 | **6 raridades** (+Incomum, +Mítico), sorteio em 2 etapas, **força dentro da raridade** (`powerTier`). | SPEC-010, ADR-014 | T0.1 |
-| [ ] T1.5 | **Redutor global de drop** (padrão ×0,6) e baú 25% → 15%. | SPEC-010 | T1.4 |
-| [ ] T1.6 | **Garantia de Lendário** em chefes, com viés para os Lendários mais fracos. | SPEC-010, ADR-014 | T1.4 |
-| [ ] T1.7 | **Fusão** 3 iguais → 20% de subir uma raridade. | SPEC-010, ADR-014 | T1.4 |
-| [ ] T1.8 | **Habilidades ativas como item** (drop com raridade; raridade define recarga, poder e área). | SPEC-011, ADR-015 | T1.4 |
-| [ ] T1.19 | **Desempenho:** spatial hash para colisão e alvo; meta de 60 fps com 400 inimigos num celular médio (medir antes/depois). | ADR-008 | T0.2 |
-| [ ] T1.9 | **Modo Infinito** + recorde local. | SPEC-013 | T1.1, T1.19 |
-| [ ] T1.10 | **Chaves de raide** (caem no Infinito) + **Modo Raide** (farm → chefe → loot próprio). | SPEC-012 | T1.6, T1.9 |
-| [ ] T1.11 | Admin: abas **Raides**, **Habilidades** e **Economia** (pesos, garantia, fusão, redutor). Campos novos nas abas existentes (traits, papel da classe, `powerTier`). | SPEC-002, 008–012 | conforme acima |
-| [ ] T1.13 | **Elementos**: tipo de dano por torre, elemento por camada, matriz editável, retorno EFICAZ/RESISTE, alvo "Eficaz". | SPEC-017, ADR-017 | T0.1 |
-| [ ] T1.14 | **Arquétipos de inimigos** (rápido, blindado, enxame, curandeiro, escudo, divisor, camuflado, ladrão, regenera) + **bestiário**. | SPEC-017, SPEC-009 | T1.1 |
-| [ ] T1.15 | **Biomas** (6) com paleta, decoração e modificador ambiental; aba Biomas e Elementos no admin. | SPEC-017 | T0.2, T1.13 |
-| [ ] T1.16 | Conteúdo por bioma: 2–3 fases + 1 raide, 4–6 inimigos, 1 variante elemental de esquimó, armas elementais. | SPEC-017 | T1.10, T1.13–T1.15 |
-| [ ] T1.17 | **Desbloqueio por fragmentos de bioma** (moeda por bioma, botão Recrutar, variantes elementais) + marcos para Domador e Xamã. Admin com forma de desbloqueio (protótipo em `preview/admin-esquimo.html`). | SPEC-018 | T1.15 |
-| [ ] T1.18 | **Aplicar o design system** (`tokens.css` + `ds.css`, visual original + filtro quente desligável) nas telas do jogo. | — | T0.2 |
-| [ ] T1.20 | **Telas dos fluxos novos** (wireframe → prévia no design system): Fusão, Recrutar variante, HUD com 2 habilidades + barra de chefe, janela de Trade, lobby do coop. Validar primeiro no celular em pé. | ADR-018 | T1.18 |
-| [ ] T1.21 | **Primeira experiência:** fase 1 guiada (posicionar, iniciar rodada, upgrade, coletar drop) + dicas contextuais na primeira vez de cada sistema (árvore, equipamento, elementos, fusão, chaves). Pulável. | — | T1.18 |
-| [ ] T1.12 | Atualizar conteúdo padrão: 1 invocador, 1 suporte, 2 aéreos, 1 raide, 6 habilidades ativas, itens nas 6 raridades. | — | T1.1–T1.10 |
+| [x] T1.1 | **Traits de inimigo** + **inimigos aéreos** (altitude, sombra, só atingidos por quem tem `hitsAir`). | SPEC-009 | T0.1, T0.2 |
+| [x] T1.2 | **Classe Suporte** (aura de buffs que não empilham por tipo; buff "antiaéreo"). | SPEC-008 | T1.1 |
+| [x] T1.3 | **Classe Invocador** (aliados saem da base e andam contra o fluxo). | SPEC-008 | T0.2 |
+| [x] T1.4 | **6 raridades** (+Incomum, +Mítico), sorteio em 2 etapas, **força dentro da raridade** (`powerTier`). | SPEC-010, ADR-014 | T0.1 |
+| [x] T1.5 | **Redutor global de drop** (padrão ×0,6) e baú 25% → 15%. | SPEC-010 | T1.4 |
+| [x] T1.6 | **Garantia de Lendário** em chefes, com viés para os Lendários mais fracos. | SPEC-010, ADR-014 | T1.4 |
+| [x] T1.7 | **Fusão** 3 iguais → 20% de subir uma raridade. | SPEC-010, ADR-014 | T1.4 |
+| [x] T1.8 | **Habilidades ativas como item** (drop com raridade; raridade define recarga, poder e área). | SPEC-011, ADR-015 | T1.4 |
+| [~] T1.19 | **Desempenho:** spatial hash para colisão e alvo; meta de 60 fps com 400 inimigos num celular médio (medir antes/depois). | ADR-008 | T0.2 |
+| [x] T1.9 | **Modo Infinito** + recorde local. | SPEC-013 | T1.1, T1.19 |
+| [x] T1.10 | **Chaves de raide** (caem no Infinito) + **Modo Raide** (farm → chefe → loot próprio). | SPEC-012 | T1.6, T1.9 |
+| [~] T1.11 | Admin: abas **Raides**, **Habilidades** e **Economia** (pesos, garantia, fusão, redutor). Campos novos nas abas existentes (traits, papel da classe, `powerTier`). | SPEC-002, 008–012 | conforme acima |
+| [~] T1.13 | **Elementos**: tipo de dano por torre, elemento por camada, matriz editável, retorno EFICAZ/RESISTE, alvo "Eficaz". | SPEC-017, ADR-017 | T0.1 |
+| [~] T1.14 | **Arquétipos de inimigos** (rápido, blindado, enxame, curandeiro, escudo, divisor, camuflado, ladrão, regenera) + **bestiário**. | SPEC-017, SPEC-009 | T1.1 |
+| [~] T1.15 | **Biomas** (6) com paleta, decoração e modificador ambiental; aba Biomas e Elementos no admin. | SPEC-017 | T0.2, T1.13 |
+| [~] T1.16 | Conteúdo por bioma: 2–3 fases + 1 raide, 4–6 inimigos, 1 variante elemental de esquimó, armas elementais. | SPEC-017 | T1.10, T1.13–T1.15 |
+| [~] T1.17 | **Desbloqueio por fragmentos de bioma** (moeda por bioma, botão Recrutar, variantes elementais) + marcos para Domador e Xamã. Admin com forma de desbloqueio (protótipo em `preview/admin-esquimo.html`). | SPEC-018 | T1.15 |
+| [~] T1.18 | **Aplicar o design system** (`tokens.css` + `ds.css`, visual original + filtro quente desligável) nas telas do jogo. | — | T0.2 |
+| [~] T1.20 | **Telas dos fluxos novos** (wireframe → prévia no design system): Fusão, Recrutar variante, HUD com 2 habilidades + barra de chefe, janela de Trade, lobby do coop. Validar primeiro no celular em pé. | ADR-018 | T1.18 |
+| [~] T1.21 | **Primeira experiência:** fase 1 guiada (posicionar, iniciar rodada, upgrade, coletar drop) + dicas contextuais na primeira vez de cada sistema (árvore, equipamento, elementos, fusão, chaves). Pulável. | — | T1.18 |
+| [x] T1.12 | Atualizar conteúdo padrão: 1 invocador, 1 suporte, 2 aéreos, 1 raide, 6 habilidades ativas, itens nas 6 raridades. | — | T1.1–T1.10 |
+
+### Estado do lançamento solo
+
+A arena, o modo Infinito e as raides estão disponíveis com progresso local. Tundra, Floresta e Caverna têm fases e raides. As outras três definições de bioma aguardam mapas, inimigos e fases. O painel inclui os formulários de Raides, Habilidades, Economia, Elementos, Biomas e recrutamento. Para fechar as tarefas marcadas como em andamento, faltam a validação completa dos arquétipos e modificadores, a medição de 60 fps em celular físico, a migração visual dos componentes restantes, as dicas dos demais fluxos e os protótipos online.
 
 ## F2 — Servidor (contas, amigos, trade, ranking)
 

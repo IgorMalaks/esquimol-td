@@ -1,5 +1,7 @@
 // Regras puras de atributos, upgrades e árvore de habilidades (sem DOM, testáveis).
 import { CLASSES } from '../data/defaults.js';
+import { CLASS_DAMAGE } from '../data/migrations.js';
+import { DAMAGE_LABELS } from './elements.js';
 
 const numericEffect = (label, suffix = '') => ({ label, fmt: (v) => `+${v}${suffix} ${label.toLowerCase()}` });
 export const EFFECT_KEYS = {
@@ -11,6 +13,8 @@ export const EFFECT_KEYS = {
   slowPct: { label: 'Lentidão %', fmt: (v) => `+${v}% lentidão` },
   multishot: { label: 'Projéteis extras', fmt: (v) => `+${v} projétil(eis)` },
   hitsAir: { label: 'Antiaéreo', fmt: () => 'Atinge aéreos' },
+  detection: { label: 'Detecção', fmt: () => 'Revela camuflados' },
+  damageType: { label: 'Tipo de dano (0–5, na ordem dos Elementos)', fmt: (v) => Object.values(DAMAGE_LABELS)[v] ?? '' },
   summonCount: numericEffect('Aliados por invocação'),
   maxAllies: numericEffect('Limite de aliados'),
   allyHp: numericEffect('Vida dos aliados'),
@@ -76,8 +80,16 @@ export function itemStatsText(item) {
 
 export function computeStats(def, { items = [], nodes = [], upgrades = null } = {}) {
   const s = { ...BASE_STATS, ...def.stats, hitsAir: Number(Boolean(def.hitsAir || CLASSES[def.classId]?.hitsAir)) };
-  for (const it of items) for (const [k, v] of Object.entries(it.stats || {})) applyEffect(s, k, v);
-  for (const n of nodes) applyEffect(s, n.effect?.key, n.effect?.value);
+  s.detection ??= 0;
+  s.damageType = def.damageType ?? CLASS_DAMAGE[def.classId] ?? 'impacto';
+  for (const it of items) {
+    if (it.type === 'arma' && it.damageType) s.damageType = it.damageType;
+    for (const [k, v] of Object.entries(it.stats || {})) if (k !== 'damageType') applyEffect(s, k, v);
+  }
+  for (const n of nodes) {
+    if (n.effect?.key === 'damageType') s.damageType = Object.keys(DAMAGE_LABELS)[n.effect.value] ?? s.damageType;
+    else applyEffect(s, n.effect?.key, n.effect?.value);
+  }
   if (upgrades) for (const [k, lvl] of Object.entries(upgrades)) UPGRADE_TRACKS[k]?.apply(s, lvl);
   s.slowPct = Math.min(s.slowPct, 80);
   s.fireRate = Math.max(0.1, s.fireRate);

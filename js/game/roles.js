@@ -5,7 +5,7 @@ export const ALLY_DEFAULTS = {
   allySpeed: 70, allyLifetime: 12, allySlowPct: 0, allyExplode: 0, allyKind: 'pinguim',
 };
 export const ALLY_OPTIONS = ['pinguim', 'foca', 'urso', 'lobo'];
-export const BUFF_KEYS = ['damage', 'speedPct', 'rangePct', 'pierce', 'antiAereo'];
+export const BUFF_KEYS = ['damage', 'speedPct', 'rangePct', 'pierce', 'antiAereo', 'detection'];
 
 export function summonerStats(def, nodes, upgrades) {
   const stats = { ...ALLY_DEFAULTS, ...def.summon };
